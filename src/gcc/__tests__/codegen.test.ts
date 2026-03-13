@@ -1,0 +1,151 @@
+import { describe, it, expect } from "vitest";
+import { generate } from "../codegen.ts";
+import type { Program } from "../types.ts";
+
+/**
+ * Helper: build a minimal AST for `int <name>() { return <value>; }`
+ */
+function makeReturnProgram(name: string, value: number): Program {
+  return {
+    type: "Program",
+    declarations: [
+      {
+        type: "FunctionDeclaration",
+        name,
+        returnType: "int",
+        params: [],
+        body: [
+          {
+            type: "ReturnStatement",
+            expression: { type: "IntegerLiteral", value },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * Helper: generate WASM and instantiate it
+ */
+async function instantiate(ast: Program): Promise<WebAssembly.Instance> {
+  const wasm = generate(ast);
+  const module = await WebAssembly.compile(wasm.buffer as ArrayBuffer);
+  return WebAssembly.instantiate(module);
+}
+
+describe("codegen", () => {
+  describe("WASM binary format", () => {
+    it("produces a Uint8Array", () => {
+      const wasm = generate(makeReturnProgram("main", 42));
+      expect(wasm).toBeInstanceOf(Uint8Array);
+    });
+
+    it("starts with WASM magic number", () => {
+      const wasm = generate(makeReturnProgram("main", 42));
+      // WASM magic: \0asm
+      expect(wasm[0]).toBe(0x00);
+      expect(wasm[1]).toBe(0x61);
+      expect(wasm[2]).toBe(0x73);
+      expect(wasm[3]).toBe(0x6d);
+    });
+
+    it("has version 1", () => {
+      const wasm = generate(makeReturnProgram("main", 42));
+      expect(wasm[4]).toBe(0x01);
+      expect(wasm[5]).toBe(0x00);
+      expect(wasm[6]).toBe(0x00);
+      expect(wasm[7]).toBe(0x00);
+    });
+
+    it("produces a valid WASM module that can be compiled", async () => {
+      const wasm = generate(makeReturnProgram("main", 42));
+      const module = await WebAssembly.compile(wasm.buffer as ArrayBuffer);
+      expect(module).toBeInstanceOf(WebAssembly.Module);
+    });
+  });
+
+  describe("exported functions", () => {
+    it("exports the main function", async () => {
+      const instance = await instantiate(makeReturnProgram("main", 42));
+      expect(typeof instance.exports.main).toBe("function");
+    });
+
+    it("exports functions by their declared name", async () => {
+      const instance = await instantiate(makeReturnProgram("answer", 42));
+      expect(typeof instance.exports.answer).toBe("function");
+    });
+  });
+
+  describe("return values", () => {
+    it("return 42 produces 42", async () => {
+      const instance = await instantiate(makeReturnProgram("main", 42));
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(42);
+    });
+
+    it("return 0 produces 0", async () => {
+      const instance = await instantiate(makeReturnProgram("main", 0));
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(0);
+    });
+
+    it("return 1 produces 1", async () => {
+      const instance = await instantiate(makeReturnProgram("main", 1));
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(1);
+    });
+
+    it("return 255 produces 255", async () => {
+      const instance = await instantiate(makeReturnProgram("main", 255));
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(255);
+    });
+
+    it("return large number 100000", async () => {
+      const instance = await instantiate(makeReturnProgram("main", 100000));
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(100000);
+    });
+  });
+
+  describe("multiple functions", () => {
+    it("exports multiple functions from one module", async () => {
+      const ast: Program = {
+        type: "Program",
+        declarations: [
+          {
+            type: "FunctionDeclaration",
+            name: "foo",
+            returnType: "int",
+            params: [],
+            body: [
+              {
+                type: "ReturnStatement",
+                expression: { type: "IntegerLiteral", value: 1 },
+              },
+            ],
+          },
+          {
+            type: "FunctionDeclaration",
+            name: "bar",
+            returnType: "int",
+            params: [],
+            body: [
+              {
+                type: "ReturnStatement",
+                expression: { type: "IntegerLiteral", value: 2 },
+              },
+            ],
+          },
+        ],
+      };
+
+      const instance = await instantiate(ast);
+      const foo = instance.exports.foo as () => number;
+      const bar = instance.exports.bar as () => number;
+      expect(foo()).toBe(1);
+      expect(bar()).toBe(2);
+    });
+  });
+});

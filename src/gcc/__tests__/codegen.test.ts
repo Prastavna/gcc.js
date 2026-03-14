@@ -275,4 +275,146 @@ describe("codegen", () => {
       expect(main() | 0).toBe(-42);
     });
   });
+
+  describe("local variables (milestone 3)", () => {
+    it("handles a single local variable", async () => {
+      const ast: Program = {
+        type: "Program",
+        declarations: [
+          {
+            type: "FunctionDeclaration",
+            name: "main",
+            returnType: "int",
+            params: [],
+            body: [
+              {
+                type: "VariableDeclaration",
+                name: "x",
+                typeSpec: "int",
+                initializer: { type: "IntegerLiteral", value: 42 },
+              },
+              {
+                type: "ReturnStatement",
+                expression: { type: "Identifier", name: "x" },
+              },
+            ],
+          },
+        ],
+      };
+      const instance = await instantiate(ast);
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(42);
+    });
+
+    it("handles two locals added together", async () => {
+      const ast: Program = {
+        type: "Program",
+        declarations: [
+          {
+            type: "FunctionDeclaration",
+            name: "main",
+            returnType: "int",
+            params: [],
+            body: [
+              {
+                type: "VariableDeclaration",
+                name: "x",
+                typeSpec: "int",
+                initializer: { type: "IntegerLiteral", value: 10 },
+              },
+              {
+                type: "VariableDeclaration",
+                name: "y",
+                typeSpec: "int",
+                initializer: { type: "IntegerLiteral", value: 20 },
+              },
+              {
+                type: "ReturnStatement",
+                expression: {
+                  type: "BinaryExpression",
+                  operator: "+",
+                  left: { type: "Identifier", name: "x" },
+                  right: { type: "Identifier", name: "y" },
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const instance = await instantiate(ast);
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(30);
+    });
+
+    it("handles variable with expression initializer", async () => {
+      const ast: Program = {
+        type: "Program",
+        declarations: [
+          {
+            type: "FunctionDeclaration",
+            name: "main",
+            returnType: "int",
+            params: [],
+            body: [
+              {
+                type: "VariableDeclaration",
+                name: "x",
+                typeSpec: "int",
+                initializer: {
+                  type: "BinaryExpression",
+                  operator: "+",
+                  left: { type: "IntegerLiteral", value: 2 },
+                  right: { type: "IntegerLiteral", value: 3 },
+                },
+              },
+              {
+                type: "ReturnStatement",
+                expression: { type: "Identifier", name: "x" },
+              },
+            ],
+          },
+        ],
+      };
+      const instance = await instantiate(ast);
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(5);
+    });
+
+    it("handles variable reassignment", async () => {
+      const ast: Program = {
+        type: "Program",
+        declarations: [
+          {
+            type: "FunctionDeclaration",
+            name: "main",
+            returnType: "int",
+            params: [],
+            body: [
+              {
+                type: "VariableDeclaration",
+                name: "x",
+                typeSpec: "int",
+                initializer: { type: "IntegerLiteral", value: 1 },
+              },
+              {
+                type: "ExpressionStatement",
+                expression: {
+                  type: "AssignmentExpression",
+                  name: "x",
+                  value: { type: "IntegerLiteral", value: 99 },
+                },
+              },
+              {
+                type: "ReturnStatement",
+                expression: { type: "Identifier", name: "x" },
+              },
+            ],
+          },
+        ],
+      };
+      const instance = await instantiate(ast);
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(99);
+    });
+  });
 });

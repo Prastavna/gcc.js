@@ -18,12 +18,13 @@ export const TokenType = {
   SEMICOLON: "SEMICOLON",
   COMMA: "COMMA",
 
-  // Operators (Milestone 2+)
+  // Operators
   PLUS: "PLUS",
   MINUS: "MINUS",
   STAR: "STAR",
   SLASH: "SLASH",
   PERCENT: "PERCENT",
+  EQUALS: "EQUALS",
 
   // Special
   EOF: "EOF",
@@ -64,15 +65,42 @@ export interface UnaryExpression {
   operand: Expression;
 }
 
-export type Expression = IntegerLiteral | BinaryExpression | UnaryExpression;
+export interface Identifier {
+  type: "Identifier";
+  name: string;
+}
+
+export interface AssignmentExpression {
+  type: "AssignmentExpression";
+  name: string;
+  value: Expression;
+}
+
+export type Expression =
+  | IntegerLiteral
+  | BinaryExpression
+  | UnaryExpression
+  | Identifier
+  | AssignmentExpression;
 
 export interface ReturnStatement {
   type: "ReturnStatement";
   expression: Expression;
 }
 
-// For now, Statement is just ReturnStatement. Grows with milestones.
-export type Statement = ReturnStatement;
+export interface VariableDeclaration {
+  type: "VariableDeclaration";
+  name: string;
+  typeSpec: TypeSpecifier;
+  initializer: Expression;
+}
+
+export interface ExpressionStatement {
+  type: "ExpressionStatement";
+  expression: Expression;
+}
+
+export type Statement = ReturnStatement | VariableDeclaration | ExpressionStatement;
 
 export interface Parameter {
   type: "Parameter";

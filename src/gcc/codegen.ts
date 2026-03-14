@@ -1,4 +1,4 @@
-import type { Program, FunctionDeclaration, Expression } from "./types.ts";
+import type { Program, FunctionDeclaration, Statement, Expression } from "./types.ts";
 import {
   WASM_MAGIC,
   WASM_VERSION,
@@ -28,22 +28,11 @@ export function generate(ast: Program): Uint8Array {
     (d): d is FunctionDeclaration => d.type === "FunctionDeclaration"
   );
 
-  // ── Type section ─────────────────────────────────────────
-  // For milestone 1, every function is () -> i32.
-  // We emit one shared type entry and all functions reference it.
   const typeSection = buildTypeSection(funcs);
-
-  // ── Function section ─────────────────────────────────────
-  // Maps each function index to its type index (all 0 for now).
   const funcSection = buildFunctionSection(funcs);
-
-  // ── Export section ───────────────────────────────────────
   const exportSection = buildExportSection(funcs);
-
-  // ── Code section ─────────────────────────────────────────
   const codeSection = buildCodeSection(funcs);
 
-  // Assemble the full module
   const bytes: number[] = [
     ...WASM_MAGIC,
     ...WASM_VERSION,
@@ -58,10 +47,9 @@ export function generate(ast: Program): Uint8Array {
 
 /**
  * Type section: declares function signatures.
- * For milestone 1: one type entry () -> i32
+ * For now: one type entry () -> i32
  */
 function buildTypeSection(_funcs: FunctionDeclaration[]): number[] {
-  // () -> i32
   const sig = [
     FUNC_TYPE_TAG,
     0x00,           // 0 params
@@ -79,7 +67,6 @@ function buildTypeSection(_funcs: FunctionDeclaration[]): number[] {
 
 /**
  * Function section: maps function index -> type index.
- * All functions use type index 0 for now.
  */
 function buildFunctionSection(funcs: FunctionDeclaration[]): number[] {
   const content = [
@@ -99,7 +86,7 @@ function buildExportSection(funcs: FunctionDeclaration[]): number[] {
     entries.push(
       ...encodeName(funcs[i].name),
       ExportKind.FUNC,
-      ...encodeUnsignedLEB128(i), // function index
+      ...encodeUnsignedLEB128(i),
     );
   }
 
@@ -129,23 +116,51 @@ function buildCodeSection(funcs: FunctionDeclaration[]): number[] {
   return makeSection(Section.CODE, content);
 }
 
+// ── Local variable tracking ──────────────────────────────
+
+/**
+ * Collect all local variable names from a function body in declaration order.
+ * Returns a map of name -> local index.
+ */
+function collectLocals(body: Statement[]): Map<string, number> {
+  const locals = new Map<string, number>();
+  for (const stmt of body) {
+    if (stmt.type === "VariableDeclaration" && !locals.has(stmt.name)) {
+      locals.set(stmt.name, locals.size);
+    }
+  }
+  return locals;
+}
+
 /**
  * Build a single function body.
- * Format: [body_size, local_count, ...instructions, end]
+ * Format: [body_size, local_decl_count, ...local_decls, ...instructions, end]
  */
 function buildFunctionBody(func: FunctionDeclaration): number[] {
+  const locals = collectLocals(func.body);
   const instructions: number[] = [];
 
   // Emit instructions for each statement
   for (const stmt of func.body) {
-    if (stmt.type === "ReturnStatement") {
-      emitExpression(instructions, stmt.expression);
-    }
+    emitStatement(instructions, stmt, locals);
   }
 
-  // Function body content: local declarations + instructions + end
+  // Build local declarations section
+  // WASM format: count of local decl entries, then each entry is (count, type)
+  const localDeclBytes: number[] = [];
+  if (locals.size > 0) {
+    // One entry: N locals of type i32
+    localDeclBytes.push(
+      ...encodeUnsignedLEB128(1), // 1 local declaration entry
+      ...encodeUnsignedLEB128(locals.size), // count of locals in this entry
+      ValType.I32, // all i32
+    );
+  } else {
+    localDeclBytes.push(0x00); // 0 local declaration entries
+  }
+
   const bodyContent = [
-    0x00, // 0 local declarations (milestone 1)
+    ...localDeclBytes,
     ...instructions,
     Op.END,
   ];
@@ -156,9 +171,39 @@ function buildFunctionBody(func: FunctionDeclaration): number[] {
   ];
 }
 
-/**
- * Map binary operator to WASM opcode.
- */
+// ── Statement emission ───────────────────────────────────
+
+function emitStatement(
+  out: number[],
+  stmt: Statement,
+  locals: Map<string, number>,
+): void {
+  switch (stmt.type) {
+    case "ReturnStatement":
+      emitExpression(out, stmt.expression, locals);
+      break;
+
+    case "VariableDeclaration": {
+      const idx = locals.get(stmt.name);
+      if (idx === undefined) {
+        throw new Error(`Unknown local variable '${stmt.name}'`);
+      }
+      emitExpression(out, stmt.initializer, locals);
+      out.push(Op.LOCAL_SET, ...encodeUnsignedLEB128(idx));
+      break;
+    }
+
+    case "ExpressionStatement":
+      // For assignment expressions, the local.set already consumes the value.
+      // For other expressions, we'd need a drop. But for now we only
+      // expect AssignmentExpression here.
+      emitExpression(out, stmt.expression, locals);
+      break;
+  }
+}
+
+// ── Expression emission ──────────────────────────────────
+
 const BINOP_MAP: Record<string, number> = {
   "+": Op.I32_ADD,
   "-": Op.I32_SUB,
@@ -173,25 +218,47 @@ const BINOP_MAP: Record<string, number> = {
  * WASM is stack-based: for `a + b` we emit instructions for `a`,
  * then `b`, then the `i32.add` opcode which pops both and pushes the result.
  */
-function emitExpression(out: number[], expr: Expression): void {
+function emitExpression(
+  out: number[],
+  expr: Expression,
+  locals: Map<string, number>,
+): void {
   switch (expr.type) {
     case "IntegerLiteral":
       out.push(Op.I32_CONST, ...encodeSignedLEB128(expr.value));
       break;
 
     case "BinaryExpression":
-      emitExpression(out, expr.left);
-      emitExpression(out, expr.right);
+      emitExpression(out, expr.left, locals);
+      emitExpression(out, expr.right, locals);
       out.push(BINOP_MAP[expr.operator]);
       break;
 
     case "UnaryExpression":
-      // -x is emitted as (0 - x)
       if (expr.operator === "-") {
         out.push(Op.I32_CONST, ...encodeSignedLEB128(0));
-        emitExpression(out, expr.operand);
+        emitExpression(out, expr.operand, locals);
         out.push(Op.I32_SUB);
       }
       break;
+
+    case "Identifier": {
+      const idx = locals.get(expr.name);
+      if (idx === undefined) {
+        throw new Error(`Unknown variable '${expr.name}'`);
+      }
+      out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(idx));
+      break;
+    }
+
+    case "AssignmentExpression": {
+      const idx = locals.get(expr.name);
+      if (idx === undefined) {
+        throw new Error(`Unknown variable '${expr.name}'`);
+      }
+      emitExpression(out, expr.value, locals);
+      out.push(Op.LOCAL_SET, ...encodeUnsignedLEB128(idx));
+      break;
+    }
   }
 }

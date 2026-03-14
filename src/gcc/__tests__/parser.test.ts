@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parse } from "../parser.ts";
 import { tokenize } from "../lexer.ts";
-import type { Program, FunctionDeclaration, ReturnStatement, IntegerLiteral, BinaryExpression, UnaryExpression } from "../types.ts";
+import type { Program, FunctionDeclaration, ReturnStatement, IntegerLiteral, BinaryExpression, UnaryExpression, VariableDeclaration, Identifier } from "../types.ts";
 
 /**
  * Helper: lex + parse in one step
@@ -177,6 +177,69 @@ describe("parser", () => {
       expect(bin.operator).toBe("+");
       expect(bin.left.type).toBe("UnaryExpression");
       expect((bin.right as IntegerLiteral).value).toBe(3);
+    });
+  });
+
+  describe("local variables (milestone 3)", () => {
+    it("parses variable declaration with initializer", () => {
+      const ast = parseSource("int main() { int x = 10; return x; }");
+      const fn = ast.declarations[0] as FunctionDeclaration;
+      expect(fn.body.length).toBe(2);
+
+      const decl = fn.body[0] as VariableDeclaration;
+      expect(decl.type).toBe("VariableDeclaration");
+      expect(decl.name).toBe("x");
+      expect(decl.typeSpec).toBe("int");
+      expect(decl.initializer.type).toBe("IntegerLiteral");
+      expect((decl.initializer as IntegerLiteral).value).toBe(10);
+    });
+
+    it("parses variable reference in return expression", () => {
+      const ast = parseSource("int main() { int x = 42; return x; }");
+      const fn = ast.declarations[0] as FunctionDeclaration;
+      const ret = fn.body[1] as ReturnStatement;
+      expect(ret.expression.type).toBe("Identifier");
+      expect((ret.expression as Identifier).name).toBe("x");
+    });
+
+    it("parses variable reference in arithmetic", () => {
+      const ast = parseSource("int main() { int x = 10; int y = 20; return x + y; }");
+      const fn = ast.declarations[0] as FunctionDeclaration;
+      const ret = fn.body[2] as ReturnStatement;
+      const bin = ret.expression as BinaryExpression;
+      expect(bin.operator).toBe("+");
+      expect((bin.left as Identifier).name).toBe("x");
+      expect((bin.right as Identifier).name).toBe("y");
+    });
+
+    it("parses variable declaration with expression initializer", () => {
+      const ast = parseSource("int main() { int x = 2 + 3; return x; }");
+      const fn = ast.declarations[0] as FunctionDeclaration;
+      const decl = fn.body[0] as VariableDeclaration;
+      expect(decl.initializer.type).toBe("BinaryExpression");
+    });
+
+    it("parses multiple variable declarations", () => {
+      const source = `int main() {
+        int a = 1;
+        int b = 2;
+        int c = 3;
+        return a + b + c;
+      }`;
+      const ast = parseSource(source);
+      const fn = ast.declarations[0] as FunctionDeclaration;
+      expect(fn.body.length).toBe(4); // 3 decls + 1 return
+    });
+
+    it("parses variable reassignment", () => {
+      const ast = parseSource("int main() { int x = 1; x = 2; return x; }");
+      const fn = ast.declarations[0] as FunctionDeclaration;
+      expect(fn.body.length).toBe(3);
+      expect(fn.body[1].type).toBe("ExpressionStatement");
+    });
+
+    it("throws on declaration without initializer", () => {
+      expect(() => parseSource("int main() { int x; return x; }")).toThrow();
     });
   });
 

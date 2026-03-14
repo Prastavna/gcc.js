@@ -19,6 +19,7 @@ const SINGLE_CHAR_TOKENS: Record<string, TokenType> = {
   "*": TokenType.STAR,
   "/": TokenType.SLASH,
   "%": TokenType.PERCENT,
+  "=": TokenType.EQUALS,
 };
 
 function isDigit(ch: string): boolean {

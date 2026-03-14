@@ -32,8 +32,12 @@ export type {
   TokenType,
   Program,
   FunctionDeclaration,
+  VariableDeclaration,
+  ExpressionStatement,
   Statement,
   Expression,
+  Identifier,
+  AssignmentExpression,
   CompileResult,
   CompileError,
 } from "./types.ts";

@@ -212,6 +212,38 @@ describe("lexer", () => {
     });
   });
 
+  describe("assignment operator (milestone 3)", () => {
+    it("tokenizes = as EQUALS", () => {
+      const tokens = tokenize("int x = 10;");
+      const eq = tokens.find((t) => t.type === TokenType.EQUALS);
+      expect(eq).toBeDefined();
+      expect(eq!.value).toBe("=");
+    });
+
+    it("tokenizes variable declaration", () => {
+      const tokens = tokenize("int x = 10;");
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([
+        TokenType.INT,
+        TokenType.IDENTIFIER,
+        TokenType.EQUALS,
+        TokenType.NUMBER,
+        TokenType.SEMICOLON,
+      ]);
+    });
+
+    it("tokenizes variable reassignment", () => {
+      const tokens = tokenize("x = 5;");
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([
+        TokenType.IDENTIFIER,
+        TokenType.EQUALS,
+        TokenType.NUMBER,
+        TokenType.SEMICOLON,
+      ]);
+    });
+  });
+
   describe("error handling", () => {
     it("throws on unexpected characters", () => {
       expect(() => tokenize("int main() { return @; }")).toThrow();

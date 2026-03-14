@@ -37,6 +37,14 @@ const examples: { label: string; code: string }[] = [
     label: 'Unary minus',
     code: `int main() {\n    return -(-10) + 5;\n}`,
   },
+  {
+    label: 'Variables',
+    code: `int main() {\n    int x = 10;\n    int y = 20;\n    return x + y;\n}`,
+  },
+  {
+    label: 'Reassignment',
+    code: `int main() {\n    int x = 1;\n    x = x + 1;\n    x = x * 3;\n    return x;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

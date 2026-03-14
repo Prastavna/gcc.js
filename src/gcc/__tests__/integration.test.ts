@@ -148,6 +148,90 @@ describe("integration: compile() end-to-end", () => {
     });
   });
 
+  describe("local variables (milestone 3)", () => {
+    it("int x = 42; return x;", async () => {
+      const source = "int main() { int x = 42; return x; }";
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("int x = 10; int y = 20; return x + y;", async () => {
+      const source = "int main() { int x = 10; int y = 20; return x + y; }";
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(30);
+    });
+
+    it("variable with expression initializer", async () => {
+      const source = "int main() { int x = 2 + 3; return x * 4; }";
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(20);
+    });
+
+    it("three variables", async () => {
+      const source = `int main() {
+        int a = 1;
+        int b = 2;
+        int c = 3;
+        return a + b + c;
+      }`;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(6);
+    });
+
+    it("variable used in complex expression", async () => {
+      const source = `int main() {
+        int x = 10;
+        int y = 3;
+        return x * y + x - y;
+      }`;
+      const instance = await compileAndInstantiate(source);
+      // 10 * 3 + 10 - 3 = 30 + 10 - 3 = 37
+      expect((instance.exports.main as () => number)()).toBe(37);
+    });
+
+    it("variable initialized from another variable", async () => {
+      const source = `int main() {
+        int x = 5;
+        int y = x + 1;
+        return y;
+      }`;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(6);
+    });
+
+    it("variable reassignment", async () => {
+      const source = `int main() {
+        int x = 1;
+        x = 42;
+        return x;
+      }`;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("reassignment with expression", async () => {
+      const source = `int main() {
+        int x = 10;
+        x = x + 5;
+        return x;
+      }`;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(15);
+    });
+
+    it("multiple reassignments", async () => {
+      const source = `int main() {
+        int x = 1;
+        x = x + 1;
+        x = x * 3;
+        return x;
+      }`;
+      const instance = await compileAndInstantiate(source);
+      // x = 1, x = 2, x = 6
+      expect((instance.exports.main as () => number)()).toBe(6);
+    });
+  });
+
   describe("error cases", () => {
     it("returns errors for invalid syntax", () => {
       const result = compile("this is not C code");

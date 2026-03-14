@@ -56,7 +56,7 @@ int main() { return 2 + 3 * 4; }
 - [x] Parenthesized expressions: `(2 + 3) * 4`
 - [x] Unary minus: `-42`, `-(-10)`, `-2 + 5`
 
-### Milestone 3: Local variables
+### Milestone 3: Local variables [DONE]
 ```c
 int main() {
     int x = 10;
@@ -64,9 +64,11 @@ int main() {
     return x + y;
 }
 ```
-- Variable declarations with initializers
-- Variable references in expressions
-- WASM locals
+- [x] Variable declarations with initializers (`int x = 10;`)
+- [x] Variable references in expressions (`return x + y;`)
+- [x] Variable reassignment (`x = x + 1;`)
+- [x] Expression statements (`x = 5;`)
+- [x] WASM locals (`local.get`, `local.set`)
 
 ### Milestone 4: Function parameters and multiple functions
 ```c

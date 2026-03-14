@@ -30,7 +30,7 @@ We write every stage — lexer, parser, codegen — from scratch in TS. Start wi
 - [x] Type definitions and interfaces
 - [x] Test cases (written before implementation)
 
-### Milestone 1: Return a number
+### Milestone 1: Return a number [DONE]
 Compile `int main() { return 42; }` to a working WASM module.
 
 **What this proves:** The full pipeline works end-to-end.
@@ -46,13 +46,15 @@ Compile `int main() { return 42; }` to a working WASM module.
 int main() { return <integer_literal>; }
 ```
 
-### Milestone 2: Arithmetic expressions
+### Milestone 2: Arithmetic expressions [DONE]
 ```c
 int main() { return 2 + 3 * 4; }
 ```
-- Operators: `+`, `-`, `*`, `/`, `%`
-- Operator precedence
-- Parenthesized expressions: `(2 + 3) * 4`
+- [x] Operators: `+`, `-`, `*`, `/`, `%`
+- [x] Operator precedence (`*`/`/`/`%` binds tighter than `+`/`-`)
+- [x] Left associativity (`10 - 3 - 2` = `(10 - 3) - 2`)
+- [x] Parenthesized expressions: `(2 + 3) * 4`
+- [x] Unary minus: `-42`, `-(-10)`, `-2 + 5`
 
 ### Milestone 3: Local variables
 ```c

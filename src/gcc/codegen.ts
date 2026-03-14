@@ -157,12 +157,41 @@ function buildFunctionBody(func: FunctionDeclaration): number[] {
 }
 
 /**
+ * Map binary operator to WASM opcode.
+ */
+const BINOP_MAP: Record<string, number> = {
+  "+": Op.I32_ADD,
+  "-": Op.I32_SUB,
+  "*": Op.I32_MUL,
+  "/": Op.I32_DIV_S,
+  "%": Op.I32_REM_S,
+};
+
+/**
  * Emit WASM instructions for an expression.
+ *
+ * WASM is stack-based: for `a + b` we emit instructions for `a`,
+ * then `b`, then the `i32.add` opcode which pops both and pushes the result.
  */
 function emitExpression(out: number[], expr: Expression): void {
   switch (expr.type) {
     case "IntegerLiteral":
       out.push(Op.I32_CONST, ...encodeSignedLEB128(expr.value));
+      break;
+
+    case "BinaryExpression":
+      emitExpression(out, expr.left);
+      emitExpression(out, expr.right);
+      out.push(BINOP_MAP[expr.operator]);
+      break;
+
+    case "UnaryExpression":
+      // -x is emitted as (0 - x)
+      if (expr.operator === "-") {
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(0));
+        emitExpression(out, expr.operand);
+        out.push(Op.I32_SUB);
+      }
       break;
   }
 }

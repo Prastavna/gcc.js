@@ -25,6 +25,18 @@ const examples: { label: string; code: string }[] = [
     label: 'Large number',
     code: `int main() {\n    return 100000;\n}`,
   },
+  {
+    label: 'Arithmetic',
+    code: `int main() {\n    return 2 + 3 * 4;\n}`,
+  },
+  {
+    label: 'Precedence',
+    code: `int main() {\n    return (2 + 3) * 4;\n}`,
+  },
+  {
+    label: 'Unary minus',
+    code: `int main() {\n    return -(-10) + 5;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

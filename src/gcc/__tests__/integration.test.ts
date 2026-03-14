@@ -76,6 +76,78 @@ describe("integration: compile() end-to-end", () => {
     });
   });
 
+  describe("arithmetic (milestone 2)", () => {
+    it("2 + 3 = 5", async () => {
+      const instance = await compileAndInstantiate("int main() { return 2 + 3; }");
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("10 - 4 = 6", async () => {
+      const instance = await compileAndInstantiate("int main() { return 10 - 4; }");
+      expect((instance.exports.main as () => number)()).toBe(6);
+    });
+
+    it("3 * 7 = 21", async () => {
+      const instance = await compileAndInstantiate("int main() { return 3 * 7; }");
+      expect((instance.exports.main as () => number)()).toBe(21);
+    });
+
+    it("10 / 3 = 3 (integer division)", async () => {
+      const instance = await compileAndInstantiate("int main() { return 10 / 3; }");
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+
+    it("10 % 3 = 1", async () => {
+      const instance = await compileAndInstantiate("int main() { return 10 % 3; }");
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("operator precedence: 2 + 3 * 4 = 14", async () => {
+      const instance = await compileAndInstantiate("int main() { return 2 + 3 * 4; }");
+      expect((instance.exports.main as () => number)()).toBe(14);
+    });
+
+    it("parentheses override precedence: (2 + 3) * 4 = 20", async () => {
+      const instance = await compileAndInstantiate("int main() { return (2 + 3) * 4; }");
+      expect((instance.exports.main as () => number)()).toBe(20);
+    });
+
+    it("left associativity: 10 - 3 - 2 = 5", async () => {
+      const instance = await compileAndInstantiate("int main() { return 10 - 3 - 2; }");
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("complex: (1 + 2) * (3 + 4) = 21", async () => {
+      const instance = await compileAndInstantiate("int main() { return (1 + 2) * (3 + 4); }");
+      expect((instance.exports.main as () => number)()).toBe(21);
+    });
+
+    it("complex: 100 - 10 * 5 + 3 = 53", async () => {
+      const instance = await compileAndInstantiate("int main() { return 100 - 10 * 5 + 3; }");
+      expect((instance.exports.main as () => number)()).toBe(53);
+    });
+
+    it("unary minus: -42", async () => {
+      const instance = await compileAndInstantiate("int main() { return -42; }");
+      expect(((instance.exports.main as () => number)()) | 0).toBe(-42);
+    });
+
+    it("unary minus in expression: -2 + 5 = 3", async () => {
+      const instance = await compileAndInstantiate("int main() { return -2 + 5; }");
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+
+    it("double negation: -(-10) = 10", async () => {
+      const instance = await compileAndInstantiate("int main() { return -(-10); }");
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+
+    it("no spaces: 2+3*4 = 14", async () => {
+      const instance = await compileAndInstantiate("int main() { return 2+3*4; }");
+      expect((instance.exports.main as () => number)()).toBe(14);
+    });
+  });
+
   describe("error cases", () => {
     it("returns errors for invalid syntax", () => {
       const result = compile("this is not C code");

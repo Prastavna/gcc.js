@@ -47,8 +47,24 @@ export interface IntegerLiteral {
   value: number;
 }
 
-// For now, Expression is just IntegerLiteral. Grows with milestones.
-export type Expression = IntegerLiteral;
+export type BinaryOperator = "+" | "-" | "*" | "/" | "%";
+
+export interface BinaryExpression {
+  type: "BinaryExpression";
+  operator: BinaryOperator;
+  left: Expression;
+  right: Expression;
+}
+
+export type UnaryOperator = "-";
+
+export interface UnaryExpression {
+  type: "UnaryExpression";
+  operator: UnaryOperator;
+  operand: Expression;
+}
+
+export type Expression = IntegerLiteral | BinaryExpression | UnaryExpression;
 
 export interface ReturnStatement {
   type: "ReturnStatement";

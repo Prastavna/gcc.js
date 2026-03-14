@@ -70,6 +70,11 @@ export const ValType = {
 export const Op = {
   END: 0x0b,
   I32_CONST: 0x41,
+  I32_ADD: 0x6a,
+  I32_SUB: 0x6b,
+  I32_MUL: 0x6c,
+  I32_DIV_S: 0x6d,
+  I32_REM_S: 0x6f,
 } as const;
 
 /** WASM export kind */

@@ -6,18 +6,23 @@ import type {
   Statement,
   Expression,
   TypeSpecifier,
+  BinaryOperator,
 } from "./types.ts";
 
 /**
- * Recursive descent parser.
+ * Recursive descent parser with precedence climbing for expressions.
  *
- * Grammar (Milestone 1):
+ * Grammar (Milestone 2):
  *   program       → function_decl*
  *   function_decl → type_spec IDENTIFIER '(' ')' '{' statement* '}'
  *   type_spec     → 'int' | 'void'
  *   statement     → return_stmt
  *   return_stmt   → 'return' expression ';'
- *   expression    → NUMBER
+ *   expression    → additive
+ *   additive      → multiplicative (('+' | '-') multiplicative)*
+ *   multiplicative→ unary (('*' | '/' | '%') unary)*
+ *   unary         → '-' unary | primary
+ *   primary       → NUMBER | '(' expression ')'
  */
 export function parse(tokens: Token[]): Program {
   let pos = 0;
@@ -52,16 +57,75 @@ export function parse(tokens: Token[]): Program {
     );
   }
 
+  // ── Expression parsing (precedence climbing) ───────────
+
   function parseExpression(): Expression {
+    return parseAdditive();
+  }
+
+  /** additive → multiplicative (('+' | '-') multiplicative)* */
+  function parseAdditive(): Expression {
+    let left = parseMultiplicative();
+    while (
+      current().type === TokenType.PLUS ||
+      current().type === TokenType.MINUS
+    ) {
+      const op = current().value as BinaryOperator;
+      pos++;
+      const right = parseMultiplicative();
+      left = { type: "BinaryExpression", operator: op, left, right };
+    }
+    return left;
+  }
+
+  /** multiplicative → unary (('*' | '/' | '%') unary)* */
+  function parseMultiplicative(): Expression {
+    let left = parseUnary();
+    while (
+      current().type === TokenType.STAR ||
+      current().type === TokenType.SLASH ||
+      current().type === TokenType.PERCENT
+    ) {
+      const op = current().value as BinaryOperator;
+      pos++;
+      const right = parseUnary();
+      left = { type: "BinaryExpression", operator: op, left, right };
+    }
+    return left;
+  }
+
+  /** unary → '-' unary | primary */
+  function parseUnary(): Expression {
+    if (current().type === TokenType.MINUS) {
+      pos++;
+      const operand = parseUnary();
+      return { type: "UnaryExpression", operator: "-", operand };
+    }
+    return parsePrimary();
+  }
+
+  /** primary → NUMBER | '(' expression ')' */
+  function parsePrimary(): Expression {
     const tok = current();
+
     if (tok.type === TokenType.NUMBER) {
       pos++;
       return { type: "IntegerLiteral", value: parseInt(tok.value, 10) };
     }
+
+    if (tok.type === TokenType.LPAREN) {
+      pos++;
+      const expr = parseExpression();
+      expect(TokenType.RPAREN, "')'");
+      return expr;
+    }
+
     throw new Error(
       `Expected expression but got '${tok.value || tok.type}' at line ${tok.line}:${tok.col}`
     );
   }
+
+  // ── Statement & declaration parsing ────────────────────
 
   function parseStatement(): Statement {
     const tok = current();

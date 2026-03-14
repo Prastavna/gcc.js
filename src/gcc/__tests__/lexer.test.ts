@@ -154,6 +154,64 @@ describe("lexer", () => {
     });
   });
 
+  describe("operators (milestone 2)", () => {
+    it("tokenizes arithmetic operators", () => {
+      const tokens = tokenize("2 + 3 * 4");
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([
+        TokenType.NUMBER,
+        TokenType.PLUS,
+        TokenType.NUMBER,
+        TokenType.STAR,
+        TokenType.NUMBER,
+      ]);
+    });
+
+    it("tokenizes all five arithmetic operators", () => {
+      const tokens = tokenize("+ - * / %");
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([
+        TokenType.PLUS,
+        TokenType.MINUS,
+        TokenType.STAR,
+        TokenType.SLASH,
+        TokenType.PERCENT,
+      ]);
+    });
+
+    it("tokenizes operators without spaces", () => {
+      const tokens = tokenize("2+3*4");
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([
+        TokenType.NUMBER,
+        TokenType.PLUS,
+        TokenType.NUMBER,
+        TokenType.STAR,
+        TokenType.NUMBER,
+      ]);
+    });
+
+    it("tokenizes parenthesized expression", () => {
+      const tokens = tokenize("(2 + 3) * 4");
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([
+        TokenType.LPAREN,
+        TokenType.NUMBER,
+        TokenType.PLUS,
+        TokenType.NUMBER,
+        TokenType.RPAREN,
+        TokenType.STAR,
+        TokenType.NUMBER,
+      ]);
+    });
+
+    it("tokenizes unary minus as MINUS + NUMBER", () => {
+      const tokens = tokenize("-42");
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([TokenType.MINUS, TokenType.NUMBER]);
+    });
+  });
+
   describe("error handling", () => {
     it("throws on unexpected characters", () => {
       expect(() => tokenize("int main() { return @; }")).toThrow();

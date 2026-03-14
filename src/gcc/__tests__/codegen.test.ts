@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { generate } from "../codegen.ts";
-import type { Program } from "../types.ts";
+import type { Program, BinaryOperator } from "../types.ts";
 
 /**
  * Helper: build a minimal AST for `int <name>() { return <value>; }`
@@ -146,6 +146,133 @@ describe("codegen", () => {
       const bar = instance.exports.bar as () => number;
       expect(foo()).toBe(1);
       expect(bar()).toBe(2);
+    });
+  });
+
+  describe("arithmetic expressions (milestone 2)", () => {
+    /**
+     * Helper: build AST for `int main() { return <expr>; }` with a binary op
+     */
+    function makeBinaryProgram(
+      op: BinaryOperator,
+      left: number,
+      right: number,
+    ): Program {
+      return {
+        type: "Program",
+        declarations: [
+          {
+            type: "FunctionDeclaration",
+            name: "main",
+            returnType: "int",
+            params: [],
+            body: [
+              {
+                type: "ReturnStatement",
+                expression: {
+                  type: "BinaryExpression",
+                  operator: op,
+                  left: { type: "IntegerLiteral", value: left },
+                  right: { type: "IntegerLiteral", value: right },
+                },
+              },
+            ],
+          },
+        ],
+      };
+    }
+
+    it("generates i32.add for +", async () => {
+      const instance = await instantiate(makeBinaryProgram("+", 2, 3));
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(5);
+    });
+
+    it("generates i32.sub for -", async () => {
+      const instance = await instantiate(makeBinaryProgram("-", 10, 4));
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(6);
+    });
+
+    it("generates i32.mul for *", async () => {
+      const instance = await instantiate(makeBinaryProgram("*", 3, 7));
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(21);
+    });
+
+    it("generates i32.div_s for /", async () => {
+      const instance = await instantiate(makeBinaryProgram("/", 10, 3));
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(3); // integer division
+    });
+
+    it("generates i32.rem_s for %", async () => {
+      const instance = await instantiate(makeBinaryProgram("%", 10, 3));
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(1);
+    });
+
+    it("handles nested binary expressions", async () => {
+      // (2 + 3) * 4 = 20
+      const ast: Program = {
+        type: "Program",
+        declarations: [
+          {
+            type: "FunctionDeclaration",
+            name: "main",
+            returnType: "int",
+            params: [],
+            body: [
+              {
+                type: "ReturnStatement",
+                expression: {
+                  type: "BinaryExpression",
+                  operator: "*",
+                  left: {
+                    type: "BinaryExpression",
+                    operator: "+",
+                    left: { type: "IntegerLiteral", value: 2 },
+                    right: { type: "IntegerLiteral", value: 3 },
+                  },
+                  right: { type: "IntegerLiteral", value: 4 },
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const instance = await instantiate(ast);
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(20);
+    });
+
+    it("handles unary negation", async () => {
+      const ast: Program = {
+        type: "Program",
+        declarations: [
+          {
+            type: "FunctionDeclaration",
+            name: "main",
+            returnType: "int",
+            params: [],
+            body: [
+              {
+                type: "ReturnStatement",
+                expression: {
+                  type: "UnaryExpression",
+                  operator: "-",
+                  operand: { type: "IntegerLiteral", value: 42 },
+                },
+              },
+            ],
+          },
+        ],
+      };
+      const instance = await instantiate(ast);
+      const main = instance.exports.main as () => number;
+      // WASM i32 is 32-bit two's complement, -42 wraps to 4294967254 as unsigned
+      // but JS reads it as signed via | 0
+      expect(main() | 0).toBe(-42);
     });
   });
 });

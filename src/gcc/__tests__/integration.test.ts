@@ -580,6 +580,107 @@ describe("integration: compile() end-to-end", () => {
     });
   });
 
+  describe("strings and printf (milestone 7)", () => {
+    /**
+     * Helper: compile and instantiate with printf bridge.
+     * Collects printf output into an array.
+     */
+    async function compileWithPrintf(source: string): Promise<{ instance: WebAssembly.Instance; output: string[] }> {
+      const result = compile(source);
+      if (!result.ok) throw new Error(`compile failed: ${result.errors[0].message}`);
+      const module = await WebAssembly.compile(result.wasm.buffer as ArrayBuffer);
+      const output: string[] = [];
+      const instance = await WebAssembly.instantiate(module, {
+        env: {
+          printf: (ptr: number) => {
+            // Read null-terminated string from memory
+            const mem = new Uint8Array((instance.exports.memory as WebAssembly.Memory).buffer);
+            let str = "";
+            let i = ptr;
+            while (mem[i] !== 0) {
+              str += String.fromCharCode(mem[i]);
+              i++;
+            }
+            output.push(str);
+            return str.length;
+          },
+        },
+      });
+      return { instance, output };
+    }
+
+    it("printf with string literal", async () => {
+      const source = `
+        int printf(int ptr);
+        int main() {
+          printf("Hello, World!\\n");
+          return 0;
+        }
+      `;
+      const { instance, output } = await compileWithPrintf(source);
+      const main = instance.exports.main as () => number;
+      main();
+      expect(output).toEqual(["Hello, World!\n"]);
+    });
+
+    it("multiple printf calls", async () => {
+      const source = `
+        int printf(int ptr);
+        int main() {
+          printf("hello ");
+          printf("world");
+          return 0;
+        }
+      `;
+      const { instance, output } = await compileWithPrintf(source);
+      (instance.exports.main as () => number)();
+      expect(output).toEqual(["hello ", "world"]);
+    });
+
+    it("string literal as function argument", async () => {
+      const source = `
+        int printf(int ptr);
+        int print_msg(int msg) {
+          printf(msg);
+          return 0;
+        }
+        int main() {
+          print_msg("test message");
+          return 0;
+        }
+      `;
+      const { instance, output } = await compileWithPrintf(source);
+      (instance.exports.main as () => number)();
+      expect(output).toEqual(["test message"]);
+    });
+
+    it("empty string", async () => {
+      const source = `
+        int printf(int ptr);
+        int main() {
+          printf("");
+          return 0;
+        }
+      `;
+      const { instance, output } = await compileWithPrintf(source);
+      (instance.exports.main as () => number)();
+      expect(output).toEqual([""]);
+    });
+
+    it("string with escape sequences", async () => {
+      const source = `
+        int printf(int ptr);
+        int main() {
+          printf("a\\tb\\nc");
+          return 0;
+        }
+      `;
+      const { instance, output } = await compileWithPrintf(source);
+      (instance.exports.main as () => number)();
+      expect(output).toEqual(["a\tb\nc"]);
+    });
+  });
+
   describe("error cases", () => {
     it("returns errors for invalid syntax", () => {
       const result = compile("this is not C code");

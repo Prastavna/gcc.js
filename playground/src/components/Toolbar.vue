@@ -69,6 +69,10 @@ const examples: { label: string; code: string }[] = [
     label: 'Swap (pointers)',
     code: `void swap(int *a, int *b) {\n    int tmp = *a;\n    *a = *b;\n    *b = tmp;\n}\n\nint main() {\n    int x = 1;\n    int y = 2;\n    swap(&x, &y);\n    return x * 10 + y;\n}`,
   },
+  {
+    label: 'Hello World',
+    code: `int printf(int ptr);\n\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

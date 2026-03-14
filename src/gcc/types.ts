@@ -12,6 +12,7 @@ export const TokenType = {
 
   // Literals
   NUMBER: "NUMBER",
+  STRING: "STRING",
   IDENTIFIER: "IDENTIFIER",
 
   // Punctuation
@@ -61,6 +62,11 @@ export type TypeSpecifier = "int" | "void";
 export interface IntegerLiteral {
   type: "IntegerLiteral";
   value: number;
+}
+
+export interface StringLiteral {
+  type: "StringLiteral";
+  value: string;
 }
 
 export type BinaryOperator = "+" | "-" | "*" | "/" | "%";
@@ -119,6 +125,7 @@ export interface DereferenceAssignment {
 
 export type Expression =
   | IntegerLiteral
+  | StringLiteral
   | BinaryExpression
   | UnaryExpression
   | Identifier
@@ -188,7 +195,14 @@ export interface FunctionDeclaration {
   body: Statement[];
 }
 
-export type Declaration = FunctionDeclaration;
+export interface ExternFunctionDeclaration {
+  type: "ExternFunctionDeclaration";
+  name: string;
+  returnType: TypeSpecifier;
+  params: Parameter[];
+}
+
+export type Declaration = FunctionDeclaration | ExternFunctionDeclaration;
 
 export interface Program {
   type: "Program";

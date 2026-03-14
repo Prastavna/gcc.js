@@ -2,7 +2,7 @@ import { TokenType } from "./types.ts";
 import type {
   Token,
   Program,
-  FunctionDeclaration,
+  Declaration,
   Parameter,
   Statement,
   Expression,
@@ -184,6 +184,11 @@ export function parse(tokens: Token[]): Program {
       return { type: "IntegerLiteral", value: parseInt(tok.value, 10) };
     }
 
+    if (tok.type === TokenType.STRING) {
+      pos++;
+      return { type: "StringLiteral", value: tok.value };
+    }
+
     if (tok.type === TokenType.IDENTIFIER) {
       const name = tok.value;
       pos++;
@@ -355,12 +360,19 @@ export function parse(tokens: Token[]): Program {
     return params;
   }
 
-  function parseFunctionDecl(): FunctionDeclaration {
+  function parseFunctionDecl(): Declaration {
     const returnType = parseTypeSpec();
     const name = expect(TokenType.IDENTIFIER, "function name").value;
     expect(TokenType.LPAREN, "'('");
     const params = parseParamList();
     expect(TokenType.RPAREN, "')'");
+
+    // Extern function declaration: ends with ';' (no body)
+    if (current().type === TokenType.SEMICOLON) {
+      pos++;
+      return { type: "ExternFunctionDeclaration", name, returnType, params };
+    }
+
     expect(TokenType.LBRACE, "'{'");
     const body: Statement[] = [];
     while (current().type !== TokenType.RBRACE && current().type !== TokenType.EOF) {
@@ -371,7 +383,7 @@ export function parse(tokens: Token[]): Program {
   }
 
   function parseProgram(): Program {
-    const declarations: FunctionDeclaration[] = [];
+    const declarations: Declaration[] = [];
     while (current().type !== TokenType.EOF) {
       declarations.push(parseFunctionDecl());
     }

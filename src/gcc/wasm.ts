@@ -53,10 +53,12 @@ export const WASM_VERSION = [0x01, 0x00, 0x00, 0x00];
 /** WASM section IDs */
 export const Section = {
   TYPE: 0x01,
+  IMPORT: 0x02,
   FUNCTION: 0x03,
   MEMORY: 0x05,
   EXPORT: 0x07,
   CODE: 0x0a,
+  DATA: 0x0b,
 } as const;
 
 /** WASM value types */

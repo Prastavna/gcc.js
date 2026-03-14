@@ -298,6 +298,35 @@ describe("lexer", () => {
     });
   });
 
+  describe("string literals (milestone 7)", () => {
+    it("tokenizes a string literal", () => {
+      const tokens = tokenize('"hello"');
+      expect(tokens[0].type).toBe(TokenType.STRING);
+      expect(tokens[0].value).toBe("hello");
+    });
+
+    it("tokenizes string with escape sequences", () => {
+      const tokens = tokenize('"hello\\n"');
+      expect(tokens[0].type).toBe(TokenType.STRING);
+      expect(tokens[0].value).toBe("hello\n");
+    });
+
+    it("tokenizes printf call with string arg", () => {
+      const tokens = tokenize('printf("Hello, World!\\n");');
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([
+        TokenType.IDENTIFIER, TokenType.LPAREN, TokenType.STRING,
+        TokenType.RPAREN, TokenType.SEMICOLON,
+      ]);
+    });
+
+    it("tokenizes empty string", () => {
+      const tokens = tokenize('""');
+      expect(tokens[0].type).toBe(TokenType.STRING);
+      expect(tokens[0].value).toBe("");
+    });
+  });
+
   describe("error handling", () => {
     it("throws on unexpected characters", () => {
       expect(() => tokenize("int main() { return @; }")).toThrow();

@@ -111,17 +111,20 @@ int main() {
 - [x] Address-taken variables automatically memory-backed
 - [x] Non-address-taken variables stay as fast WASM locals
 
-### Milestone 7: Strings and printf (via JS bridge)
+### Milestone 7: Strings and printf (via JS bridge) [DONE]
 ```c
-#include <stdio.h>
+int printf(int ptr);
 int main() {
     printf("Hello, World!\n");
     return 0;
 }
 ```
-- String literals stored in WASM memory
-- `printf` implemented as an imported JS function
-- Minimal libc headers (in-memory)
+- [x] String literals stored in WASM linear memory (DATA section)
+- [x] `printf` as an imported function from `env.printf`
+- [x] Extern function declarations (`int printf(int ptr);`)
+- [x] WASM Import section for extern functions
+- [x] Escape sequences: `\n`, `\t`, `\r`, `\\`, `\"`, `\0`
+- [x] Null-terminated strings in memory
 
 ---
 

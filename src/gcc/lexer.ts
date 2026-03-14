@@ -66,6 +66,35 @@ export function tokenize(source: string): Token[] {
       continue;
     }
 
+    // String literals
+    if (ch === '"') {
+      const startCol = col;
+      pos++; col++; // skip opening quote
+      let value = "";
+      while (pos < source.length && source[pos] !== '"') {
+        if (source[pos] === '\\' && pos + 1 < source.length) {
+          pos++; col++;
+          const esc = source[pos];
+          switch (esc) {
+            case 'n': value += '\n'; break;
+            case 't': value += '\t'; break;
+            case 'r': value += '\r'; break;
+            case '\\': value += '\\'; break;
+            case '"': value += '"'; break;
+            case '0': value += '\0'; break;
+            default: value += esc; break;
+          }
+        } else {
+          value += source[pos];
+        }
+        pos++; col++;
+      }
+      if (pos >= source.length) throw new Error(`Unterminated string at line ${line}, col ${startCol}`);
+      pos++; col++; // skip closing quote
+      tokens.push({ type: TokenType.STRING, value, line, col: startCol });
+      continue;
+    }
+
     // Two-character operators (must check before single-char)
     if (ch === "=" && peekChar() === "=") {
       tokens.push({ type: TokenType.EQ, value: "==", line, col });

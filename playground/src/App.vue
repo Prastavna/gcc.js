@@ -42,9 +42,29 @@ async function runCompile() {
 
     log('success', `Compiled successfully (${elapsed}ms, ${result.wasm.byteLength} bytes)`)
 
-    // Instantiate and run
+    // Instantiate with printf bridge
     const module = await WebAssembly.compile(result.wasm.buffer as ArrayBuffer)
-    const instance = await WebAssembly.instantiate(module)
+    let instance: WebAssembly.Instance
+    try {
+      instance = await WebAssembly.instantiate(module, {
+        env: {
+          printf: (ptr: number) => {
+            const mem = new Uint8Array((instance.exports.memory as WebAssembly.Memory).buffer)
+            let str = ''
+            let i = ptr
+            while (mem[i] !== 0 && i < mem.length) {
+              str += String.fromCharCode(mem[i])
+              i++
+            }
+            log('info', `printf: ${str}`)
+            return str.length
+          },
+        },
+      })
+    } catch {
+      // If import fails (no imports needed), try without
+      instance = await WebAssembly.instantiate(module)
+    }
 
     // Log all exports
     const exportNames = Object.keys(instance.exports)

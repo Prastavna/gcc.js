@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parse } from "../parser.ts";
 import { tokenize } from "../lexer.ts";
-import type { Program, FunctionDeclaration, ReturnStatement, IntegerLiteral, BinaryExpression, UnaryExpression, VariableDeclaration, Identifier } from "../types.ts";
+import type { Program, FunctionDeclaration, ReturnStatement, IntegerLiteral, BinaryExpression, UnaryExpression, VariableDeclaration, Identifier, CallExpression } from "../types.ts";
 
 /**
  * Helper: lex + parse in one step
@@ -240,6 +240,87 @@ describe("parser", () => {
 
     it("throws on declaration without initializer", () => {
       expect(() => parseSource("int main() { int x; return x; }")).toThrow();
+    });
+  });
+
+  describe("function parameters and calls (milestone 4)", () => {
+    it("parses function with one parameter", () => {
+      const ast = parseSource("int identity(int x) { return x; }");
+      const fn = ast.declarations[0] as FunctionDeclaration;
+      expect(fn.params.length).toBe(1);
+      expect(fn.params[0].name).toBe("x");
+      expect(fn.params[0].typeSpec).toBe("int");
+    });
+
+    it("parses function with two parameters", () => {
+      const ast = parseSource("int add(int a, int b) { return a + b; }");
+      const fn = ast.declarations[0] as FunctionDeclaration;
+      expect(fn.params.length).toBe(2);
+      expect(fn.params[0].name).toBe("a");
+      expect(fn.params[1].name).toBe("b");
+    });
+
+    it("parses function with no parameters (empty parens)", () => {
+      const ast = parseSource("int foo() { return 1; }");
+      const fn = ast.declarations[0] as FunctionDeclaration;
+      expect(fn.params.length).toBe(0);
+    });
+
+    it("parses function call with no arguments", () => {
+      const source = `
+        int foo() { return 42; }
+        int main() { return foo(); }
+      `;
+      const ast = parseSource(source);
+      const main = ast.declarations[1] as FunctionDeclaration;
+      const ret = main.body[0] as ReturnStatement;
+      expect(ret.expression.type).toBe("CallExpression");
+      const call = ret.expression as CallExpression;
+      expect(call.callee).toBe("foo");
+      expect(call.args.length).toBe(0);
+    });
+
+    it("parses function call with arguments", () => {
+      const source = `
+        int add(int a, int b) { return a + b; }
+        int main() { return add(3, 4); }
+      `;
+      const ast = parseSource(source);
+      const main = ast.declarations[1] as FunctionDeclaration;
+      const ret = main.body[0] as ReturnStatement;
+      const call = ret.expression as CallExpression;
+      expect(call.callee).toBe("add");
+      expect(call.args.length).toBe(2);
+      expect((call.args[0] as IntegerLiteral).value).toBe(3);
+      expect((call.args[1] as IntegerLiteral).value).toBe(4);
+    });
+
+    it("parses function call with expression arguments", () => {
+      const source = `
+        int add(int a, int b) { return a + b; }
+        int main() { return add(1 + 2, 3 * 4); }
+      `;
+      const ast = parseSource(source);
+      const main = ast.declarations[1] as FunctionDeclaration;
+      const ret = main.body[0] as ReturnStatement;
+      const call = ret.expression as CallExpression;
+      expect(call.args[0].type).toBe("BinaryExpression");
+      expect(call.args[1].type).toBe("BinaryExpression");
+    });
+
+    it("parses nested function calls", () => {
+      const source = `
+        int double(int x) { return x + x; }
+        int main() { return double(double(3)); }
+      `;
+      const ast = parseSource(source);
+      const main = ast.declarations[1] as FunctionDeclaration;
+      const ret = main.body[0] as ReturnStatement;
+      const outer = ret.expression as CallExpression;
+      expect(outer.callee).toBe("double");
+      const inner = outer.args[0] as CallExpression;
+      expect(inner.callee).toBe("double");
+      expect((inner.args[0] as IntegerLiteral).value).toBe(3);
     });
   });
 

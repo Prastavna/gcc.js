@@ -232,6 +232,110 @@ describe("integration: compile() end-to-end", () => {
     });
   });
 
+  describe("function parameters and calls (milestone 4)", () => {
+    it("function with one param: identity(42) = 42", async () => {
+      const source = `
+        int identity(int x) { return x; }
+        int main() { return identity(42); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("function with two params: add(3, 4) = 7", async () => {
+      const source = `
+        int add(int a, int b) { return a + b; }
+        int main() { return add(3, 4); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+
+    it("params used in arithmetic", async () => {
+      const source = `
+        int calc(int x, int y) { return x * y + x; }
+        int main() { return calc(5, 3); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 5*3 + 5 = 20
+      expect((instance.exports.main as () => number)()).toBe(20);
+    });
+
+    it("nested function calls: double(double(3)) = 12", async () => {
+      const source = `
+        int double(int x) { return x + x; }
+        int main() { return double(double(3)); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(12);
+    });
+
+    it("calling with expression arguments", async () => {
+      const source = `
+        int add(int a, int b) { return a + b; }
+        int main() { return add(1 + 2, 3 * 4); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // add(3, 12) = 15
+      expect((instance.exports.main as () => number)()).toBe(15);
+    });
+
+    it("three params", async () => {
+      const source = `
+        int sum3(int a, int b, int c) { return a + b + c; }
+        int main() { return sum3(10, 20, 30); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(60);
+    });
+
+    it("params and locals together", async () => {
+      const source = `
+        int compute(int x, int y) {
+          int sum = x + y;
+          int product = x * y;
+          return sum + product;
+        }
+        int main() { return compute(3, 4); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // sum=7, product=12, 7+12=19
+      expect((instance.exports.main as () => number)()).toBe(19);
+    });
+
+    it("multiple functions calling each other", async () => {
+      const source = `
+        int square(int x) { return x * x; }
+        int sum_of_squares(int a, int b) { return square(a) + square(b); }
+        int main() { return sum_of_squares(3, 4); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 9 + 16 = 25
+      expect((instance.exports.main as () => number)()).toBe(25);
+    });
+
+    it("exported function with params can be called from JS", async () => {
+      const source = `
+        int add(int a, int b) { return a + b; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      const add = instance.exports.add as (a: number, b: number) => number;
+      expect(add(10, 20)).toBe(30);
+      expect(add(0, 0)).toBe(0);
+      expect(add(100, 200)).toBe(300);
+    });
+
+    it("zero-arg call to function defined later still works", async () => {
+      // Functions are all declared at module level, order shouldn't matter for calls
+      const source = `
+        int main() { return get_value(); }
+        int get_value() { return 99; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(99);
+    });
+  });
+
   describe("error cases", () => {
     it("returns errors for invalid syntax", () => {
       const result = compile("this is not C code");

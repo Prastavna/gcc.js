@@ -45,6 +45,14 @@ const examples: { label: string; code: string }[] = [
     label: 'Reassignment',
     code: `int main() {\n    int x = 1;\n    x = x + 1;\n    x = x * 3;\n    return x;\n}`,
   },
+  {
+    label: 'Function calls',
+    code: `int add(int a, int b) {\n    return a + b;\n}\n\nint main() {\n    return add(3, 4);\n}`,
+  },
+  {
+    label: 'Sum of squares',
+    code: `int square(int x) {\n    return x * x;\n}\n\nint sum_of_squares(int a, int b) {\n    return square(a) + square(b);\n}\n\nint main() {\n    return sum_of_squares(3, 4);\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

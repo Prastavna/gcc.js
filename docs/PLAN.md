@@ -70,14 +70,17 @@ int main() {
 - [x] Expression statements (`x = 5;`)
 - [x] WASM locals (`local.get`, `local.set`)
 
-### Milestone 4: Function parameters and multiple functions
+### Milestone 4: Function parameters and multiple functions [DONE]
 ```c
 int add(int a, int b) { return a + b; }
 int main() { return add(3, 4); }
 ```
-- Function parameters
-- Function calls
-- Multiple function exports
+- [x] Function parameters (`int add(int a, int b)`)
+- [x] Function calls (`add(3, 4)`)
+- [x] Nested calls (`double(double(3))`)
+- [x] Params + locals together in same function
+- [x] Per-function type signatures in WASM
+- [x] Multiple function exports callable from JS
 
 ### Milestone 5: Control flow
 ```c

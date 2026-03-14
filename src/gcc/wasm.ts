@@ -68,6 +68,7 @@ export const ValType = {
 
 /** WASM instruction opcodes */
 export const Op = {
+  CALL: 0x10,
   END: 0x0b,
   LOCAL_GET: 0x20,
   LOCAL_SET: 0x21,

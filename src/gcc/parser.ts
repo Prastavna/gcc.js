@@ -3,6 +3,7 @@ import type {
   Token,
   Program,
   FunctionDeclaration,
+  Parameter,
   Statement,
   Expression,
   TypeSpecifier,
@@ -12,20 +13,23 @@ import type {
 /**
  * Recursive descent parser with precedence climbing for expressions.
  *
- * Grammar (Milestone 3):
+ * Grammar (Milestone 4):
  *   program        → function_decl*
- *   function_decl  → type_spec IDENTIFIER '(' ')' '{' statement* '}'
+ *   function_decl  → type_spec IDENTIFIER '(' param_list? ')' '{' statement* '}'
+ *   param_list     → param (',' param)*
+ *   param          → type_spec IDENTIFIER
  *   type_spec      → 'int' | 'void'
  *   statement      → var_decl | return_stmt | expr_stmt
  *   var_decl       → type_spec IDENTIFIER '=' expression ';'
  *   return_stmt    → 'return' expression ';'
- *   expr_stmt      → expression ';'          (for assignments like x = 5;)
+ *   expr_stmt      → expression ';'
  *   expression     → assignment
  *   assignment     → IDENTIFIER '=' assignment | additive
  *   additive       → multiplicative (('+' | '-') multiplicative)*
  *   multiplicative → unary (('*' | '/' | '%') unary)*
  *   unary          → '-' unary | primary
- *   primary        → NUMBER | IDENTIFIER | '(' expression ')'
+ *   primary        → NUMBER | IDENTIFIER '(' arg_list? ')' | IDENTIFIER | '(' expression ')'
+ *   arg_list       → expression (',' expression)*
  */
 export function parse(tokens: Token[]): Program {
   let pos = 0;
@@ -76,9 +80,6 @@ export function parse(tokens: Token[]): Program {
 
   /**
    * assignment → IDENTIFIER '=' assignment | additive
-   *
-   * We check if the current token is IDENTIFIER followed by '='.
-   * If so, parse as assignment. Otherwise fall through to additive.
    */
   function parseAssignment(): Expression {
     if (
@@ -87,7 +88,7 @@ export function parse(tokens: Token[]): Program {
     ) {
       const name = current().value;
       pos += 2; // skip identifier and '='
-      const value = parseAssignment(); // right-associative
+      const value = parseAssignment();
       return { type: "AssignmentExpression", name, value };
     }
     return parseAdditive();
@@ -134,7 +135,7 @@ export function parse(tokens: Token[]): Program {
     return parsePrimary();
   }
 
-  /** primary → NUMBER | IDENTIFIER | '(' expression ')' */
+  /** primary → NUMBER | IDENTIFIER '(' arg_list? ')' | IDENTIFIER | '(' expression ')' */
   function parsePrimary(): Expression {
     const tok = current();
 
@@ -144,8 +145,25 @@ export function parse(tokens: Token[]): Program {
     }
 
     if (tok.type === TokenType.IDENTIFIER) {
+      const name = tok.value;
       pos++;
-      return { type: "Identifier", name: tok.value };
+
+      // Function call: IDENTIFIER '(' arg_list? ')'
+      if (current().type === TokenType.LPAREN) {
+        pos++; // skip '('
+        const args: Expression[] = [];
+        if (current().type !== TokenType.RPAREN) {
+          args.push(parseExpression());
+          while (current().type === TokenType.COMMA) {
+            pos++; // skip ','
+            args.push(parseExpression());
+          }
+        }
+        expect(TokenType.RPAREN, "')' after function arguments");
+        return { type: "CallExpression", callee: name, args };
+      }
+
+      return { type: "Identifier", name };
     }
 
     if (tok.type === TokenType.LPAREN) {
@@ -164,7 +182,12 @@ export function parse(tokens: Token[]): Program {
 
   function parseStatement(): Statement {
     // Variable declaration: int x = expr;
-    if (isTypeSpec() && peek(1).type === TokenType.IDENTIFIER) {
+    // Disambiguate from function start by checking for '=' after 'type IDENT'
+    if (
+      isTypeSpec() &&
+      peek(1).type === TokenType.IDENTIFIER &&
+      peek(2).type === TokenType.EQUALS
+    ) {
       const typeSpec = parseTypeSpec();
       const name = expect(TokenType.IDENTIFIER, "variable name").value;
       expect(TokenType.EQUALS, "'=' in variable declaration");
@@ -187,10 +210,32 @@ export function parse(tokens: Token[]): Program {
     return { type: "ExpressionStatement", expression };
   }
 
+  /** Parse parameter list: type_spec IDENTIFIER (',' type_spec IDENTIFIER)* */
+  function parseParamList(): Parameter[] {
+    const params: Parameter[] = [];
+    if (current().type === TokenType.RPAREN) {
+      return params; // empty param list
+    }
+    // First param
+    const firstType = parseTypeSpec();
+    const firstName = expect(TokenType.IDENTIFIER, "parameter name").value;
+    params.push({ type: "Parameter", name: firstName, typeSpec: firstType });
+
+    while (current().type === TokenType.COMMA) {
+      pos++; // skip ','
+      const paramType = parseTypeSpec();
+      const paramName = expect(TokenType.IDENTIFIER, "parameter name").value;
+      params.push({ type: "Parameter", name: paramName, typeSpec: paramType });
+    }
+
+    return params;
+  }
+
   function parseFunctionDecl(): FunctionDeclaration {
     const returnType = parseTypeSpec();
     const name = expect(TokenType.IDENTIFIER, "function name").value;
     expect(TokenType.LPAREN, "'('");
+    const params = parseParamList();
     expect(TokenType.RPAREN, "')'");
     expect(TokenType.LBRACE, "'{'");
 
@@ -205,7 +250,7 @@ export function parse(tokens: Token[]): Program {
       type: "FunctionDeclaration",
       name,
       returnType,
-      params: [],
+      params,
       body,
     };
   }

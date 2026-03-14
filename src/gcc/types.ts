@@ -76,12 +76,19 @@ export interface AssignmentExpression {
   value: Expression;
 }
 
+export interface CallExpression {
+  type: "CallExpression";
+  callee: string;
+  args: Expression[];
+}
+
 export type Expression =
   | IntegerLiteral
   | BinaryExpression
   | UnaryExpression
   | Identifier
-  | AssignmentExpression;
+  | AssignmentExpression
+  | CallExpression;
 
 export interface ReturnStatement {
   type: "ReturnStatement";

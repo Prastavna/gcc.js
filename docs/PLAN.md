@@ -95,7 +95,7 @@ int abs(int x) {
 - [x] `for` loops (with var decl or expr init)
 - [x] Nested control flow (if inside while, etc.)
 
-### Milestone 6: Pointers and memory
+### Milestone 6: Pointers and memory [DONE]
 ```c
 int main() {
     int x = 42;
@@ -103,10 +103,13 @@ int main() {
     return *p;
 }
 ```
-- WASM linear memory
-- Address-of operator `&`
-- Dereference operator `*`
-- Pointer arithmetic
+- [x] WASM linear memory (1 page, 64KB)
+- [x] Address-of operator `&x`
+- [x] Dereference read `*p`
+- [x] Dereference write `*p = val`
+- [x] Pointer parameters (`void swap(int *a, int *b)`)
+- [x] Address-taken variables automatically memory-backed
+- [x] Non-address-taken variables stay as fast WASM locals
 
 ### Milestone 7: Strings and printf (via JS bridge)
 ```c

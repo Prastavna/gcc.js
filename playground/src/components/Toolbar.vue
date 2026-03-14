@@ -65,6 +65,10 @@ const examples: { label: string; code: string }[] = [
     label: 'If/else',
     code: `int abs(int x) {\n    if (x < 0) {\n        return -x;\n    } else {\n        return x;\n    }\n}\n\nint main() {\n    return abs(-7);\n}`,
   },
+  {
+    label: 'Swap (pointers)',
+    code: `void swap(int *a, int *b) {\n    int tmp = *a;\n    *a = *b;\n    *b = tmp;\n}\n\nint main() {\n    int x = 1;\n    int y = 2;\n    swap(&x, &y);\n    return x * 10 + y;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

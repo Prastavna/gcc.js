@@ -506,6 +506,80 @@ describe("integration: compile() end-to-end", () => {
     });
   });
 
+  describe("pointers and memory (milestone 6)", () => {
+    it("address-of and dereference: basic round-trip", async () => {
+      const source = `
+        int main() {
+          int x = 42;
+          int *p = &x;
+          return *p;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("write through pointer", async () => {
+      const source = `
+        int main() {
+          int x = 10;
+          int *p = &x;
+          *p = 99;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(99);
+    });
+
+    it("two variables, pointer to each", async () => {
+      const source = `
+        int main() {
+          int a = 1;
+          int b = 2;
+          int *pa = &a;
+          int *pb = &b;
+          return *pa + *pb;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+
+    it("pointer arithmetic: adjacent address-taken vars", async () => {
+      const source = `
+        int main() {
+          int a = 10;
+          int b = 20;
+          int *p = &a;
+          int *q = &b;
+          return *p + *q;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(30);
+    });
+
+    it("swap via pointers", async () => {
+      const source = `
+        void swap(int *a, int *b) {
+          int tmp = *a;
+          *a = *b;
+          *b = tmp;
+        }
+        int main() {
+          int x = 1;
+          int y = 2;
+          swap(&x, &y);
+          return x * 10 + y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // x=2, y=1, so 2*10+1 = 21
+      expect((instance.exports.main as () => number)()).toBe(21);
+    });
+  });
+
   describe("error cases", () => {
     it("returns errors for invalid syntax", () => {
       const result = compile("this is not C code");

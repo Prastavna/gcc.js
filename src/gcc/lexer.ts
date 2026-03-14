@@ -23,6 +23,7 @@ const SIMPLE_TOKENS: Record<string, TokenType> = {
   "*": TokenType.STAR,
   "/": TokenType.SLASH,
   "%": TokenType.PERCENT,
+  "&": TokenType.AMPERSAND,
 };
 
 function isDigit(ch: string): boolean {

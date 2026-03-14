@@ -54,6 +54,7 @@ export const WASM_VERSION = [0x01, 0x00, 0x00, 0x00];
 export const Section = {
   TYPE: 0x01,
   FUNCTION: 0x03,
+  MEMORY: 0x05,
   EXPORT: 0x07,
   CODE: 0x0a,
 } as const;
@@ -95,6 +96,10 @@ export const Op = {
   I32_LE_S: 0x4c,
   I32_GE_S: 0x4e,
 
+  // Memory
+  I32_LOAD: 0x28,
+  I32_STORE: 0x36,
+
   // Arithmetic
   I32_ADD: 0x6a,
   I32_SUB: 0x6b,
@@ -112,6 +117,7 @@ export const BLOCK_I32 = ValType.I32;
 /** WASM export kind */
 export const ExportKind = {
   FUNC: 0x00,
+  MEMORY: 0x02,
 } as const;
 
 /** WASM function type tag */

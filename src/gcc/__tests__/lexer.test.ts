@@ -280,6 +280,24 @@ describe("lexer", () => {
     });
   });
 
+  describe("pointer tokens (milestone 6)", () => {
+    it("tokenizes & as AMPERSAND", () => {
+      const tokens = tokenize("&x");
+      expect(tokens[0].type).toBe(TokenType.AMPERSAND);
+      expect(tokens[0].value).toBe("&");
+    });
+
+    it("tokenizes pointer declaration int *p", () => {
+      const tokens = tokenize("int *p = &x;");
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([
+        TokenType.INT, TokenType.STAR, TokenType.IDENTIFIER,
+        TokenType.EQUALS, TokenType.AMPERSAND, TokenType.IDENTIFIER,
+        TokenType.SEMICOLON,
+      ]);
+    });
+  });
+
   describe("error handling", () => {
     it("throws on unexpected characters", () => {
       expect(() => tokenize("int main() { return @; }")).toThrow();

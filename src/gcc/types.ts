@@ -30,6 +30,9 @@ export const TokenType = {
   PERCENT: "PERCENT",
   EQUALS: "EQUALS",
 
+  // Pointer
+  AMPERSAND: "AMPERSAND",  // &
+
   // Comparison operators
   EQ: "EQ",       // ==
   NEQ: "NEQ",     // !=
@@ -95,13 +98,35 @@ export interface CallExpression {
   args: Expression[];
 }
 
+/** &x — takes the address of a variable */
+export interface AddressOfExpression {
+  type: "AddressOfExpression";
+  name: string;
+}
+
+/** *p — reads through a pointer */
+export interface DereferenceExpression {
+  type: "DereferenceExpression";
+  operand: Expression;
+}
+
+/** *p = val — writes through a pointer */
+export interface DereferenceAssignment {
+  type: "DereferenceAssignment";
+  pointer: Expression;
+  value: Expression;
+}
+
 export type Expression =
   | IntegerLiteral
   | BinaryExpression
   | UnaryExpression
   | Identifier
   | AssignmentExpression
-  | CallExpression;
+  | CallExpression
+  | AddressOfExpression
+  | DereferenceExpression
+  | DereferenceAssignment;
 
 export interface ReturnStatement {
   type: "ReturnStatement";

@@ -87,6 +87,21 @@ export function parse(tokens: Token[]): Program {
   }
 
   function parseAssignment(): Expression {
+    // *expr = val (dereference assignment)
+    if (current().type === TokenType.STAR) {
+      const savedPos = pos;
+      pos++; // skip *
+      const pointer = parseUnary();
+      if (current().type === TokenType.EQUALS) {
+        pos++; // skip =
+        const value = parseAssignment();
+        return { type: "DereferenceAssignment", pointer, value };
+      }
+      // Not an assignment, backtrack — parse as dereference in normal flow
+      pos = savedPos;
+    }
+
+    // ident = val
     if (
       current().type === TokenType.IDENTIFIER &&
       peek(1).type === TokenType.EQUALS
@@ -145,6 +160,18 @@ export function parse(tokens: Token[]): Program {
       pos++;
       const operand = parseUnary();
       return { type: "UnaryExpression", operator: "-", operand };
+    }
+    // *expr (dereference)
+    if (current().type === TokenType.STAR) {
+      pos++;
+      const operand = parseUnary();
+      return { type: "DereferenceExpression", operand };
+    }
+    // &ident (address-of)
+    if (current().type === TokenType.AMPERSAND) {
+      pos++;
+      const name = expect(TokenType.IDENTIFIER, "variable name after '&'").value;
+      return { type: "AddressOfExpression", name };
     }
     return parsePrimary();
   }
@@ -205,6 +232,22 @@ export function parse(tokens: Token[]): Program {
   }
 
   function parseStatement(): Statement {
+    // Pointer variable declaration: int *p = expr;
+    if (
+      isTypeSpec() &&
+      peek(1).type === TokenType.STAR &&
+      peek(2).type === TokenType.IDENTIFIER &&
+      peek(3).type === TokenType.EQUALS
+    ) {
+      const typeSpec = parseTypeSpec();
+      pos++; // skip '*'
+      const name = expect(TokenType.IDENTIFIER, "variable name").value;
+      expect(TokenType.EQUALS, "'=' in variable declaration");
+      const initializer = parseExpression();
+      expect(TokenType.SEMICOLON, "';' after variable declaration");
+      return { type: "VariableDeclaration", name, typeSpec, initializer };
+    }
+
     // Variable declaration: int x = expr;
     if (
       isTypeSpec() &&
@@ -292,17 +335,22 @@ export function parse(tokens: Token[]): Program {
 
   // ── Top-level parsing ─────────────────────────────────
 
+  /** Parse one parameter, handling optional `*` for pointer types */
+  function parseOneParam(): Parameter {
+    const typeSpec = parseTypeSpec();
+    // Skip optional * for pointer params (int *p) — treated as i32 at WASM level
+    if (current().type === TokenType.STAR) pos++;
+    const name = expect(TokenType.IDENTIFIER, "parameter name").value;
+    return { type: "Parameter", name, typeSpec };
+  }
+
   function parseParamList(): Parameter[] {
     const params: Parameter[] = [];
     if (current().type === TokenType.RPAREN) return params;
-    const firstType = parseTypeSpec();
-    const firstName = expect(TokenType.IDENTIFIER, "parameter name").value;
-    params.push({ type: "Parameter", name: firstName, typeSpec: firstType });
+    params.push(parseOneParam());
     while (current().type === TokenType.COMMA) {
       pos++;
-      const paramType = parseTypeSpec();
-      const paramName = expect(TokenType.IDENTIFIER, "parameter name").value;
-      params.push({ type: "Parameter", name: paramName, typeSpec: paramType });
+      params.push(parseOneParam());
     }
     return params;
   }

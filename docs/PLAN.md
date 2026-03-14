@@ -128,6 +128,211 @@ int main() {
 
 ---
 
+## Phase 2: Towards C89
+
+### Milestone 8: More types and type casting
+```c
+int main() {
+    char c = 'A';
+    long big = 100000;
+    int x = (int)big;
+    return c + x;
+}
+```
+- `char` type (8-bit, stored as i32 in WASM)
+- `long` type (mapped to i64 in WASM)
+- Character literals (`'A'`, `'\n'`)
+- Type casting (`(int)expr`, `(char)expr`)
+- Implicit int promotion in expressions
+- `sizeof` operator (compile-time constant)
+
+### Milestone 9: Arrays
+```c
+int main() {
+    int arr[5];
+    arr[0] = 10;
+    arr[1] = 20;
+    return arr[0] + arr[1];
+}
+```
+- Fixed-size array declarations (`int arr[5]`)
+- Array indexing read (`arr[i]`)
+- Array indexing write (`arr[i] = val`)
+- Arrays in linear memory (contiguous)
+- Array as function parameter (decays to pointer)
+- Array initializers (`int arr[3] = {1, 2, 3}`)
+
+### Milestone 10: Structs
+```c
+struct Point { int x; int y; };
+int distance_sq(struct Point p) {
+    return p.x * p.x + p.y * p.y;
+}
+int main() {
+    struct Point p;
+    p.x = 3;
+    p.y = 4;
+    return distance_sq(p);
+}
+```
+- Struct type declarations
+- Member access (`p.x`)
+- Pointer-to-struct arrow operator (`p->x`)
+- Struct layout in linear memory (field offsets)
+- Struct as function parameter and return value
+- Nested structs
+
+### Milestone 11: Dynamic memory (malloc/free)
+```c
+int printf(int ptr);
+int main() {
+    int *arr = malloc(10 * sizeof(int));
+    for (int i = 0; i < 10; i = i + 1) {
+        arr[i] = i * i;
+    }
+    printf("done\n");
+    free(arr);
+    return arr[5];
+}
+```
+- Built-in `malloc` (bump allocator on linear memory)
+- Built-in `free` (no-op initially, then freelist)
+- Pointer indexing (`ptr[i]` as sugar for `*(ptr + i * sizeof(T))`)
+- `sizeof` for all types
+- Grow memory via `memory.grow` when needed
+
+### Milestone 12: Global variables and static data
+```c
+int counter = 0;
+void increment() { counter = counter + 1; }
+int main() {
+    increment();
+    increment();
+    return counter;
+}
+```
+- Global variable declarations (outside functions)
+- WASM globals (mutable i32/i64)
+- Static initialization
+- Global arrays and structs
+
+### Milestone 13: Switch, break, continue
+```c
+int classify(int x) {
+    switch (x) {
+        case 0: return 0;
+        case 1: return 1;
+        default: return 2;
+    }
+}
+int sum_odd(int n) {
+    int sum = 0;
+    for (int i = 0; i < n; i = i + 1) {
+        if (i % 2 == 0) continue;
+        sum = sum + i;
+    }
+    return sum;
+}
+```
+- `switch` / `case` / `default` (WASM `br_table`)
+- `break` in loops and switch
+- `continue` in loops
+- Labeled loops (stretch)
+
+### Milestone 14: Logical operators and comma
+```c
+int main() {
+    int x = 5;
+    if (x > 0 && x < 10) return 1;
+    if (x == 0 || x == 5) return 2;
+    int y = (x = 3, x + 1);
+    return !y;
+}
+```
+- `&&` (short-circuit AND)
+- `||` (short-circuit OR)
+- `!` (logical NOT)
+- Comma operator
+- Ternary operator (`a ? b : c`)
+- Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`)
+- Increment/decrement (`++`, `--`)
+
+### Milestone 15: Preprocessor
+```c
+#define MAX_SIZE 100
+#define SQUARE(x) ((x) * (x))
+
+int main() {
+    int arr[MAX_SIZE];
+    arr[0] = SQUARE(5);
+    return arr[0];
+}
+```
+- `#define` constants (text substitution)
+- `#define` function-like macros
+- `#ifdef` / `#ifndef` / `#endif`
+- `#include` (virtual in-memory file system)
+- Line/column tracking through macros
+
+### Milestone 16: Enums, typedefs, and union
+```c
+typedef unsigned int uint;
+enum Color { RED, GREEN, BLUE };
+union Value {
+    int i;
+    char c;
+};
+int main() {
+    enum Color c = GREEN;
+    uint x = 42;
+    return c + x;
+}
+```
+- `enum` declarations (integer constants)
+- `typedef` (type aliases)
+- `union` (overlapping memory layout)
+- `unsigned` integer type
+- Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`)
+
+### Milestone 17: Complete program target
+```c
+int printf(int ptr);
+
+struct Node {
+    int value;
+    struct Node *next;
+};
+
+struct Node* push(struct Node *head, int val) {
+    struct Node *n = malloc(sizeof(struct Node));
+    n->value = val;
+    n->next = head;
+    return n;
+}
+
+int sum_list(struct Node *head) {
+    int sum = 0;
+    while (head != 0) {
+        sum = sum + head->value;
+        head = head->next;
+    }
+    return sum;
+}
+
+int main() {
+    struct Node *list = 0;
+    for (int i = 1; i <= 10; i = i + 1) {
+        list = push(list, i);
+    }
+    return sum_list(list);
+}
+```
+- **Target**: a linked list program that compiles and runs correctly
+- Validates: structs, pointers, malloc, loops, function calls all working together
+- This is the "graduation" test for the compiler
+
+---
+
 ## Technical Stack
 
 | Tool       | Purpose              |

@@ -82,17 +82,18 @@ int main() { return add(3, 4); }
 - [x] Per-function type signatures in WASM
 - [x] Multiple function exports callable from JS
 
-### Milestone 5: Control flow
+### Milestone 5: Control flow [DONE]
 ```c
 int abs(int x) {
     if (x < 0) return -x;
     return x;
 }
 ```
-- `if` / `else`
-- Comparison operators: `<`, `>`, `<=`, `>=`, `==`, `!=`
-- `while` loops
-- `for` loops
+- [x] `if` / `else` (with blocks and single statements)
+- [x] Comparison operators: `<`, `>`, `<=`, `>=`, `==`, `!=`
+- [x] `while` loops
+- [x] `for` loops (with var decl or expr init)
+- [x] Nested control flow (if inside while, etc.)
 
 ### Milestone 6: Pointers and memory
 ```c

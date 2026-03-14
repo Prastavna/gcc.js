@@ -336,6 +336,176 @@ describe("integration: compile() end-to-end", () => {
     });
   });
 
+  describe("control flow (milestone 5)", () => {
+    it("if: returns branch based on condition", async () => {
+      const source = `
+        int max(int a, int b) {
+          if (a > b) return a;
+          return b;
+        }
+        int main() { return max(5, 3); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("if/else", async () => {
+      const source = `
+        int abs(int x) {
+          if (x < 0) {
+            return -x;
+          } else {
+            return x;
+          }
+        }
+        int main() { return abs(-7); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+
+    it("== comparison", async () => {
+      const source = `
+        int is_zero(int x) {
+          if (x == 0) return 1;
+          return 0;
+        }
+        int main() { return is_zero(0); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("!= comparison", async () => {
+      const source = `
+        int is_nonzero(int x) {
+          if (x != 0) return 1;
+          return 0;
+        }
+        int main() { return is_nonzero(5); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("<= and >= comparisons", async () => {
+      const source = `
+        int clamp(int x, int lo, int hi) {
+          if (x <= lo) return lo;
+          if (x >= hi) return hi;
+          return x;
+        }
+        int main() { return clamp(50, 0, 10); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+
+    it("while loop: sum 1 to 10", async () => {
+      const source = `
+        int main() {
+          int sum = 0;
+          int i = 1;
+          while (i <= 10) {
+            sum = sum + i;
+            i = i + 1;
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(55);
+    });
+
+    it("while loop: factorial", async () => {
+      const source = `
+        int factorial(int n) {
+          int result = 1;
+          int i = 1;
+          while (i <= n) {
+            result = result * i;
+            i = i + 1;
+          }
+          return result;
+        }
+        int main() { return factorial(5); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(120);
+    });
+
+    it("for loop: sum 1 to 5", async () => {
+      const source = `
+        int main() {
+          int sum = 0;
+          for (int i = 1; i <= 5; i = i + 1) {
+            sum = sum + i;
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(15);
+    });
+
+    it("for loop: fibonacci", async () => {
+      const source = `
+        int fib(int n) {
+          int a = 0;
+          int b = 1;
+          for (int i = 0; i < n; i = i + 1) {
+            int temp = b;
+            b = a + b;
+            a = temp;
+          }
+          return a;
+        }
+        int main() { return fib(10); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(55);
+    });
+
+    it("nested if inside while", async () => {
+      const source = `
+        int count_even(int n) {
+          int count = 0;
+          int i = 0;
+          while (i < n) {
+            if (i % 2 == 0) {
+              count = count + 1;
+            }
+            i = i + 1;
+          }
+          return count;
+        }
+        int main() { return count_even(10); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 0,2,4,6,8 = 5 even numbers
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("if/else with blocks", async () => {
+      const source = `
+        int sign(int x) {
+          if (x > 0) {
+            return 1;
+          } else {
+            if (x < 0) {
+              return -1;
+            } else {
+              return 0;
+            }
+          }
+        }
+        int main() { return sign(-5); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect(((instance.exports.main as () => number)()) | 0).toBe(-1);
+    });
+  });
+
   describe("error cases", () => {
     it("returns errors for invalid syntax", () => {
       const result = compile("this is not C code");

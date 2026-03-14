@@ -5,6 +5,10 @@ export const TokenType = {
   INT: "INT",
   VOID: "VOID",
   RETURN: "RETURN",
+  IF: "IF",
+  ELSE: "ELSE",
+  WHILE: "WHILE",
+  FOR: "FOR",
 
   // Literals
   NUMBER: "NUMBER",
@@ -25,6 +29,14 @@ export const TokenType = {
   SLASH: "SLASH",
   PERCENT: "PERCENT",
   EQUALS: "EQUALS",
+
+  // Comparison operators
+  EQ: "EQ",       // ==
+  NEQ: "NEQ",     // !=
+  LT: "LT",       // <
+  GT: "GT",        // >
+  LTE: "LTE",     // <=
+  GTE: "GTE",     // >=
 
   // Special
   EOF: "EOF",
@@ -49,10 +61,11 @@ export interface IntegerLiteral {
 }
 
 export type BinaryOperator = "+" | "-" | "*" | "/" | "%";
+export type ComparisonOperator = "==" | "!=" | "<" | ">" | "<=" | ">=";
 
 export interface BinaryExpression {
   type: "BinaryExpression";
-  operator: BinaryOperator;
+  operator: BinaryOperator | ComparisonOperator;
   left: Expression;
   right: Expression;
 }
@@ -107,7 +120,34 @@ export interface ExpressionStatement {
   expression: Expression;
 }
 
-export type Statement = ReturnStatement | VariableDeclaration | ExpressionStatement;
+export interface IfStatement {
+  type: "IfStatement";
+  condition: Expression;
+  consequent: Statement[];
+  alternate: Statement[] | null;
+}
+
+export interface WhileStatement {
+  type: "WhileStatement";
+  condition: Expression;
+  body: Statement[];
+}
+
+export interface ForStatement {
+  type: "ForStatement";
+  init: Statement;          // var decl or expr stmt
+  condition: Expression;
+  update: Expression;       // e.g. i = i + 1
+  body: Statement[];
+}
+
+export type Statement =
+  | ReturnStatement
+  | VariableDeclaration
+  | ExpressionStatement
+  | IfStatement
+  | WhileStatement
+  | ForStatement;
 
 export interface Parameter {
   type: "Parameter";

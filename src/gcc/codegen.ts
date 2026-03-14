@@ -7,6 +7,7 @@ import {
   Op,
   ExportKind,
   FUNC_TYPE_TAG,
+  BLOCK_VOID,
   encodeUnsignedLEB128,
   encodeSignedLEB128,
   encodeName,
@@ -21,16 +22,14 @@ export function generate(ast: Program): Uint8Array {
     (d): d is FunctionDeclaration => d.type === "FunctionDeclaration"
   );
 
-  // Build function name -> index map (needed for call instructions)
   const funcIndex = new Map<string, number>();
   for (let i = 0; i < funcs.length; i++) {
     funcIndex.set(funcs[i].name, i);
   }
 
-  // Deduplicate type signatures. Key: "paramCount" (all i32 for now)
   const typeSigs: number[][] = [];
-  const typeSigMap = new Map<string, number>(); // signature key -> type index
-  const funcTypeIndices: number[] = []; // func index -> type index
+  const typeSigMap = new Map<string, number>();
+  const funcTypeIndices: number[] = [];
 
   for (const func of funcs) {
     const paramCount = func.params.length;
@@ -63,34 +62,25 @@ export function generate(ast: Program): Uint8Array {
 
 // ── Type signatures ──────────────────────────────────────
 
-/** Build a single type signature: (i32, i32, ...) -> i32 */
 function buildTypeSig(paramCount: number): number[] {
   return [
     FUNC_TYPE_TAG,
     ...encodeUnsignedLEB128(paramCount),
     ...Array(paramCount).fill(ValType.I32),
-    0x01,        // 1 result
-    ValType.I32, // result type: i32
+    0x01,
+    ValType.I32,
   ];
 }
 
 function buildTypeSection(typeSigs: number[][]): number[] {
-  const content: number[] = [
-    ...encodeUnsignedLEB128(typeSigs.length),
-  ];
-  for (const sig of typeSigs) {
-    content.push(...sig);
-  }
+  const content: number[] = [...encodeUnsignedLEB128(typeSigs.length)];
+  for (const sig of typeSigs) content.push(...sig);
   return makeSection(Section.TYPE, content);
 }
 
 function buildFunctionSection(funcTypeIndices: number[]): number[] {
-  const content: number[] = [
-    ...encodeUnsignedLEB128(funcTypeIndices.length),
-  ];
-  for (const idx of funcTypeIndices) {
-    content.push(...encodeUnsignedLEB128(idx));
-  }
+  const content: number[] = [...encodeUnsignedLEB128(funcTypeIndices.length)];
+  for (const idx of funcTypeIndices) content.push(...encodeUnsignedLEB128(idx));
   return makeSection(Section.FUNCTION, content);
 }
 
@@ -103,10 +93,7 @@ function buildExportSection(funcs: FunctionDeclaration[]): number[] {
       ...encodeUnsignedLEB128(i),
     );
   }
-  const content = [
-    ...encodeUnsignedLEB128(funcs.length),
-    ...entries,
-  ];
+  const content = [...encodeUnsignedLEB128(funcs.length), ...entries];
   return makeSection(Section.EXPORT, content);
 }
 
@@ -118,116 +105,209 @@ function buildCodeSection(
   for (const func of funcs) {
     bodies.push(...buildFunctionBody(func, funcIndex));
   }
-  const content = [
-    ...encodeUnsignedLEB128(funcs.length),
-    ...bodies,
-  ];
+  const content = [...encodeUnsignedLEB128(funcs.length), ...bodies];
   return makeSection(Section.CODE, content);
 }
 
 // ── Local variable tracking ──────────────────────────────
 
 /**
- * Build local variable name -> index map.
- * In WASM, params occupy indices 0..N-1, then declared locals start at N.
+ * Recursively collect all variable declarations from a statement list,
+ * including inside if/while/for bodies.
  */
-function collectLocals(func: FunctionDeclaration): Map<string, number> {
-  const locals = new Map<string, number>();
-
-  // Params first
-  for (let i = 0; i < func.params.length; i++) {
-    locals.set(func.params[i].name, i);
-  }
-
-  // Then declared locals
-  const offset = func.params.length;
-  let localIdx = 0;
-  for (const stmt of func.body) {
-    if (stmt.type === "VariableDeclaration" && !locals.has(stmt.name)) {
-      locals.set(stmt.name, offset + localIdx);
-      localIdx++;
-    }
-  }
-
-  return locals;
-}
-
-/** Count declared locals (not params) */
-function countDeclaredLocals(func: FunctionDeclaration): number {
-  const seen = new Set<string>();
+function collectLocalsFromStatements(
+  stmts: Statement[],
+  locals: Map<string, number>,
+  offset: number,
+): number {
   let count = 0;
-  for (const stmt of func.body) {
-    if (stmt.type === "VariableDeclaration" && !seen.has(stmt.name)) {
-      seen.add(stmt.name);
+  for (const stmt of stmts) {
+    if (stmt.type === "VariableDeclaration" && !locals.has(stmt.name)) {
+      locals.set(stmt.name, offset + count);
       count++;
+    }
+    if (stmt.type === "IfStatement") {
+      count += collectLocalsFromStatements(stmt.consequent, locals, offset + count);
+      if (stmt.alternate) {
+        count += collectLocalsFromStatements(stmt.alternate, locals, offset + count);
+      }
+    }
+    if (stmt.type === "WhileStatement") {
+      count += collectLocalsFromStatements(stmt.body, locals, offset + count);
+    }
+    if (stmt.type === "ForStatement") {
+      // The init may be a var decl
+      count += collectLocalsFromStatements([stmt.init], locals, offset + count);
+      count += collectLocalsFromStatements(stmt.body, locals, offset + count);
     }
   }
   return count;
+}
+
+function collectLocals(func: FunctionDeclaration): { locals: Map<string, number>; declaredCount: number } {
+  const locals = new Map<string, number>();
+  for (let i = 0; i < func.params.length; i++) {
+    locals.set(func.params[i].name, i);
+  }
+  const offset = func.params.length;
+  const declaredCount = collectLocalsFromStatements(func.body, locals, offset);
+  return { locals, declaredCount };
 }
 
 function buildFunctionBody(
   func: FunctionDeclaration,
   funcIndex: Map<string, number>,
 ): number[] {
-  const locals = collectLocals(func);
-  const declaredLocalCount = countDeclaredLocals(func);
+  const { locals, declaredCount } = collectLocals(func);
   const instructions: number[] = [];
 
-  for (const stmt of func.body) {
-    emitStatement(instructions, stmt, locals, funcIndex);
-  }
+  emitStatements(instructions, func.body, locals, funcIndex);
 
-  // Local declarations (only declared locals, not params — params are implicit)
   const localDeclBytes: number[] = [];
-  if (declaredLocalCount > 0) {
+  if (declaredCount > 0) {
     localDeclBytes.push(
       ...encodeUnsignedLEB128(1),
-      ...encodeUnsignedLEB128(declaredLocalCount),
+      ...encodeUnsignedLEB128(declaredCount),
       ValType.I32,
     );
   } else {
     localDeclBytes.push(0x00);
   }
 
-  const bodyContent = [
-    ...localDeclBytes,
-    ...instructions,
-    Op.END,
-  ];
+  // Every function must leave exactly one i32 on the stack for its return value.
+  // When all paths use `return` (Op.RETURN), the fallthrough is unreachable,
+  // but WASM validation still requires a value. Push a dummy 0.
+  instructions.push(Op.I32_CONST, ...encodeSignedLEB128(0));
 
-  return [
-    ...encodeUnsignedLEB128(bodyContent.length),
-    ...bodyContent,
-  ];
+  const bodyContent = [...localDeclBytes, ...instructions, Op.END];
+  return [...encodeUnsignedLEB128(bodyContent.length), ...bodyContent];
 }
 
 // ── Statement emission ───────────────────────────────────
 
-function emitStatement(
+type Ctx = {
+  locals: Map<string, number>;
+  funcIndex: Map<string, number>;
+};
+
+function emitStatements(
   out: number[],
-  stmt: Statement,
+  stmts: Statement[],
   locals: Map<string, number>,
   funcIndex: Map<string, number>,
 ): void {
+  for (const stmt of stmts) {
+    emitStatement(out, stmt, { locals, funcIndex });
+  }
+}
+
+function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
   switch (stmt.type) {
     case "ReturnStatement":
-      emitExpression(out, stmt.expression, locals, funcIndex);
+      emitExpression(out, stmt.expression, ctx);
+      out.push(Op.RETURN);
       break;
 
     case "VariableDeclaration": {
-      const idx = locals.get(stmt.name);
-      if (idx === undefined) {
-        throw new Error(`Unknown local variable '${stmt.name}'`);
-      }
-      emitExpression(out, stmt.initializer, locals, funcIndex);
+      const idx = ctx.locals.get(stmt.name);
+      if (idx === undefined) throw new Error(`Unknown local '${stmt.name}'`);
+      emitExpression(out, stmt.initializer, ctx);
       out.push(Op.LOCAL_SET, ...encodeUnsignedLEB128(idx));
       break;
     }
 
     case "ExpressionStatement":
-      emitExpression(out, stmt.expression, locals, funcIndex);
+      emitExpression(out, stmt.expression, ctx);
+      break;
+
+    case "IfStatement":
+      emitIf(out, stmt, ctx);
+      break;
+
+    case "WhileStatement":
+      emitWhile(out, stmt, ctx);
+      break;
+
+    case "ForStatement":
+      emitFor(out, stmt, ctx);
       break;
   }
+}
+
+/**
+ * WASM if/else:
+ *   <condition>
+ *   if (void)
+ *     <consequent>
+ *   else
+ *     <alternate>
+ *   end
+ */
+function emitIf(
+  out: number[],
+  stmt: { condition: Expression; consequent: Statement[]; alternate: Statement[] | null },
+  ctx: Ctx,
+): void {
+  emitExpression(out, stmt.condition, ctx);
+  out.push(Op.IF, BLOCK_VOID);
+  for (const s of stmt.consequent) emitStatement(out, s, ctx);
+  if (stmt.alternate) {
+    out.push(Op.ELSE);
+    for (const s of stmt.alternate) emitStatement(out, s, ctx);
+  }
+  out.push(Op.END);
+}
+
+/**
+ * WASM while loop:
+ *   block $break
+ *     loop $continue
+ *       <condition>
+ *       i32.eqz
+ *       br_if $break        ;; if condition is false, break
+ *       <body>
+ *       br $continue         ;; jump back to loop start
+ *     end
+ *   end
+ */
+function emitWhile(
+  out: number[],
+  stmt: { condition: Expression; body: Statement[] },
+  ctx: Ctx,
+): void {
+  out.push(Op.BLOCK, BLOCK_VOID);  // $break (depth 1 from inside loop)
+  out.push(Op.LOOP, BLOCK_VOID);   // $continue (depth 0 from inside loop)
+  emitExpression(out, stmt.condition, ctx);
+  out.push(Op.I32_EQZ);
+  out.push(Op.BR_IF, ...encodeUnsignedLEB128(1)); // br_if $break
+  for (const s of stmt.body) emitStatement(out, s, ctx);
+  out.push(Op.BR, ...encodeUnsignedLEB128(0));    // br $continue
+  out.push(Op.END); // end loop
+  out.push(Op.END); // end block
+}
+
+/**
+ * For loop desugars to: init; while (condition) { body; update; }
+ */
+function emitFor(
+  out: number[],
+  stmt: { init: Statement; condition: Expression; update: Expression; body: Statement[] },
+  ctx: Ctx,
+): void {
+  // Emit init
+  emitStatement(out, stmt.init, ctx);
+
+  // Emit while loop
+  out.push(Op.BLOCK, BLOCK_VOID);
+  out.push(Op.LOOP, BLOCK_VOID);
+  emitExpression(out, stmt.condition, ctx);
+  out.push(Op.I32_EQZ);
+  out.push(Op.BR_IF, ...encodeUnsignedLEB128(1));
+  for (const s of stmt.body) emitStatement(out, s, ctx);
+  emitExpression(out, stmt.update, ctx); // update expression (e.g. assignment)
+  out.push(Op.BR, ...encodeUnsignedLEB128(0));
+  out.push(Op.END);
+  out.push(Op.END);
 }
 
 // ── Expression emission ──────────────────────────────────
@@ -238,61 +318,53 @@ const BINOP_MAP: Record<string, number> = {
   "*": Op.I32_MUL,
   "/": Op.I32_DIV_S,
   "%": Op.I32_REM_S,
+  "==": Op.I32_EQ,
+  "!=": Op.I32_NE,
+  "<": Op.I32_LT_S,
+  ">": Op.I32_GT_S,
+  "<=": Op.I32_LE_S,
+  ">=": Op.I32_GE_S,
 };
 
-function emitExpression(
-  out: number[],
-  expr: Expression,
-  locals: Map<string, number>,
-  funcIndex: Map<string, number>,
-): void {
+function emitExpression(out: number[], expr: Expression, ctx: Ctx): void {
   switch (expr.type) {
     case "IntegerLiteral":
       out.push(Op.I32_CONST, ...encodeSignedLEB128(expr.value));
       break;
 
     case "BinaryExpression":
-      emitExpression(out, expr.left, locals, funcIndex);
-      emitExpression(out, expr.right, locals, funcIndex);
+      emitExpression(out, expr.left, ctx);
+      emitExpression(out, expr.right, ctx);
       out.push(BINOP_MAP[expr.operator]);
       break;
 
     case "UnaryExpression":
       if (expr.operator === "-") {
         out.push(Op.I32_CONST, ...encodeSignedLEB128(0));
-        emitExpression(out, expr.operand, locals, funcIndex);
+        emitExpression(out, expr.operand, ctx);
         out.push(Op.I32_SUB);
       }
       break;
 
     case "Identifier": {
-      const idx = locals.get(expr.name);
-      if (idx === undefined) {
-        throw new Error(`Unknown variable '${expr.name}'`);
-      }
+      const idx = ctx.locals.get(expr.name);
+      if (idx === undefined) throw new Error(`Unknown variable '${expr.name}'`);
       out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(idx));
       break;
     }
 
     case "AssignmentExpression": {
-      const idx = locals.get(expr.name);
-      if (idx === undefined) {
-        throw new Error(`Unknown variable '${expr.name}'`);
-      }
-      emitExpression(out, expr.value, locals, funcIndex);
+      const idx = ctx.locals.get(expr.name);
+      if (idx === undefined) throw new Error(`Unknown variable '${expr.name}'`);
+      emitExpression(out, expr.value, ctx);
       out.push(Op.LOCAL_SET, ...encodeUnsignedLEB128(idx));
       break;
     }
 
     case "CallExpression": {
-      const fIdx = funcIndex.get(expr.callee);
-      if (fIdx === undefined) {
-        throw new Error(`Unknown function '${expr.callee}'`);
-      }
-      // Push all arguments onto the stack
-      for (const arg of expr.args) {
-        emitExpression(out, arg, locals, funcIndex);
-      }
+      const fIdx = ctx.funcIndex.get(expr.callee);
+      if (fIdx === undefined) throw new Error(`Unknown function '${expr.callee}'`);
+      for (const arg of expr.args) emitExpression(out, arg, ctx);
       out.push(Op.CALL, ...encodeUnsignedLEB128(fIdx));
       break;
     }

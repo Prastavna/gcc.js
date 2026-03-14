@@ -53,6 +53,18 @@ const examples: { label: string; code: string }[] = [
     label: 'Sum of squares',
     code: `int square(int x) {\n    return x * x;\n}\n\nint sum_of_squares(int a, int b) {\n    return square(a) + square(b);\n}\n\nint main() {\n    return sum_of_squares(3, 4);\n}`,
   },
+  {
+    label: 'Factorial',
+    code: `int factorial(int n) {\n    int result = 1;\n    int i = 1;\n    while (i <= n) {\n        result = result * i;\n        i = i + 1;\n    }\n    return result;\n}\n\nint main() {\n    return factorial(5);\n}`,
+  },
+  {
+    label: 'Fibonacci',
+    code: `int fib(int n) {\n    int a = 0;\n    int b = 1;\n    for (int i = 0; i < n; i = i + 1) {\n        int temp = b;\n        b = a + b;\n        a = temp;\n    }\n    return a;\n}\n\nint main() {\n    return fib(10);\n}`,
+  },
+  {
+    label: 'If/else',
+    code: `int abs(int x) {\n    if (x < 0) {\n        return -x;\n    } else {\n        return x;\n    }\n}\n\nint main() {\n    return abs(-7);\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

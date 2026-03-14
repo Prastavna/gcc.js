@@ -8,23 +8,30 @@ import type {
   Expression,
   TypeSpecifier,
   BinaryOperator,
+  ComparisonOperator,
 } from "./types.ts";
 
 /**
  * Recursive descent parser with precedence climbing for expressions.
  *
- * Grammar (Milestone 4):
+ * Grammar (Milestone 5):
  *   program        → function_decl*
  *   function_decl  → type_spec IDENTIFIER '(' param_list? ')' '{' statement* '}'
  *   param_list     → param (',' param)*
  *   param          → type_spec IDENTIFIER
  *   type_spec      → 'int' | 'void'
- *   statement      → var_decl | return_stmt | expr_stmt
+ *   statement      → var_decl | return_stmt | if_stmt | while_stmt | for_stmt
+ *                   | block | expr_stmt
  *   var_decl       → type_spec IDENTIFIER '=' expression ';'
  *   return_stmt    → 'return' expression ';'
+ *   if_stmt        → 'if' '(' expression ')' block_or_stmt ('else' block_or_stmt)?
+ *   while_stmt     → 'while' '(' expression ')' block_or_stmt
+ *   for_stmt       → 'for' '(' (var_decl | expr_stmt) expression ';' expression ')' block_or_stmt
+ *   block_or_stmt  → '{' statement* '}' | statement
  *   expr_stmt      → expression ';'
  *   expression     → assignment
- *   assignment     → IDENTIFIER '=' assignment | additive
+ *   assignment     → IDENTIFIER '=' assignment | comparison
+ *   comparison     → additive (('==' | '!=' | '<' | '>' | '<=' | '>=') additive)*
  *   additive       → multiplicative (('+' | '-') multiplicative)*
  *   multiplicative → unary (('*' | '/' | '%') unary)*
  *   unary          → '-' unary | primary
@@ -59,17 +66,18 @@ export function parse(tokens: Token[]): Program {
 
   function parseTypeSpec(): TypeSpecifier {
     const tok = current();
-    if (tok.type === TokenType.INT) {
-      pos++;
-      return "int";
-    }
-    if (tok.type === TokenType.VOID) {
-      pos++;
-      return "void";
-    }
+    if (tok.type === TokenType.INT) { pos++; return "int"; }
+    if (tok.type === TokenType.VOID) { pos++; return "void"; }
     throw new Error(
       `Expected type specifier (int/void) but got '${tok.value || tok.type}' at line ${tok.line}:${tok.col}`
     );
+  }
+
+  function isComparisonOp(): boolean {
+    const t = current().type;
+    return t === TokenType.EQ || t === TokenType.NEQ ||
+      t === TokenType.LT || t === TokenType.GT ||
+      t === TokenType.LTE || t === TokenType.GTE;
   }
 
   // ── Expression parsing (precedence climbing) ───────────
@@ -78,23 +86,31 @@ export function parse(tokens: Token[]): Program {
     return parseAssignment();
   }
 
-  /**
-   * assignment → IDENTIFIER '=' assignment | additive
-   */
   function parseAssignment(): Expression {
     if (
       current().type === TokenType.IDENTIFIER &&
       peek(1).type === TokenType.EQUALS
     ) {
       const name = current().value;
-      pos += 2; // skip identifier and '='
+      pos += 2;
       const value = parseAssignment();
       return { type: "AssignmentExpression", name, value };
     }
-    return parseAdditive();
+    return parseComparison();
   }
 
-  /** additive → multiplicative (('+' | '-') multiplicative)* */
+  /** comparison → additive (('==' | '!=' | '<' | '>' | '<=' | '>=') additive)* */
+  function parseComparison(): Expression {
+    let left = parseAdditive();
+    while (isComparisonOp()) {
+      const op = current().value as ComparisonOperator;
+      pos++;
+      const right = parseAdditive();
+      left = { type: "BinaryExpression", operator: op, left, right };
+    }
+    return left;
+  }
+
   function parseAdditive(): Expression {
     let left = parseMultiplicative();
     while (
@@ -109,7 +125,6 @@ export function parse(tokens: Token[]): Program {
     return left;
   }
 
-  /** multiplicative → unary (('*' | '/' | '%') unary)* */
   function parseMultiplicative(): Expression {
     let left = parseUnary();
     while (
@@ -125,7 +140,6 @@ export function parse(tokens: Token[]): Program {
     return left;
   }
 
-  /** unary → '-' unary | primary */
   function parseUnary(): Expression {
     if (current().type === TokenType.MINUS) {
       pos++;
@@ -135,7 +149,6 @@ export function parse(tokens: Token[]): Program {
     return parsePrimary();
   }
 
-  /** primary → NUMBER | IDENTIFIER '(' arg_list? ')' | IDENTIFIER | '(' expression ')' */
   function parsePrimary(): Expression {
     const tok = current();
 
@@ -147,22 +160,19 @@ export function parse(tokens: Token[]): Program {
     if (tok.type === TokenType.IDENTIFIER) {
       const name = tok.value;
       pos++;
-
-      // Function call: IDENTIFIER '(' arg_list? ')'
       if (current().type === TokenType.LPAREN) {
-        pos++; // skip '('
+        pos++;
         const args: Expression[] = [];
         if (current().type !== TokenType.RPAREN) {
           args.push(parseExpression());
           while (current().type === TokenType.COMMA) {
-            pos++; // skip ','
+            pos++;
             args.push(parseExpression());
           }
         }
         expect(TokenType.RPAREN, "')' after function arguments");
         return { type: "CallExpression", callee: name, args };
       }
-
       return { type: "Identifier", name };
     }
 
@@ -178,11 +188,24 @@ export function parse(tokens: Token[]): Program {
     );
   }
 
-  // ── Statement & declaration parsing ────────────────────
+  // ── Statement parsing ─────────────────────────────────
+
+  /** Parse a block { ... } or a single statement */
+  function parseBlockOrStatement(): Statement[] {
+    if (current().type === TokenType.LBRACE) {
+      pos++; // skip '{'
+      const stmts: Statement[] = [];
+      while (current().type !== TokenType.RBRACE && current().type !== TokenType.EOF) {
+        stmts.push(parseStatement());
+      }
+      expect(TokenType.RBRACE, "'}'");
+      return stmts;
+    }
+    return [parseStatement()];
+  }
 
   function parseStatement(): Statement {
     // Variable declaration: int x = expr;
-    // Disambiguate from function start by checking for '=' after 'type IDENT'
     if (
       isTypeSpec() &&
       peek(1).type === TokenType.IDENTIFIER &&
@@ -204,30 +227,83 @@ export function parse(tokens: Token[]): Program {
       return { type: "ReturnStatement", expression };
     }
 
-    // Expression statement (e.g. x = 5;)
+    // If statement
+    if (current().type === TokenType.IF) {
+      pos++;
+      expect(TokenType.LPAREN, "'(' after 'if'");
+      const condition = parseExpression();
+      expect(TokenType.RPAREN, "')' after if condition");
+      const consequent = parseBlockOrStatement();
+      let alternate: Statement[] | null = null;
+      if (current().type === TokenType.ELSE) {
+        pos++;
+        alternate = parseBlockOrStatement();
+      }
+      return { type: "IfStatement", condition, consequent, alternate };
+    }
+
+    // While statement
+    if (current().type === TokenType.WHILE) {
+      pos++;
+      expect(TokenType.LPAREN, "'(' after 'while'");
+      const condition = parseExpression();
+      expect(TokenType.RPAREN, "')' after while condition");
+      const body = parseBlockOrStatement();
+      return { type: "WhileStatement", condition, body };
+    }
+
+    // For statement: for (init; condition; update) body
+    if (current().type === TokenType.FOR) {
+      pos++;
+      expect(TokenType.LPAREN, "'(' after 'for'");
+
+      // init: var decl or expr stmt (both end with ;)
+      let init: Statement;
+      if (
+        isTypeSpec() &&
+        peek(1).type === TokenType.IDENTIFIER &&
+        peek(2).type === TokenType.EQUALS
+      ) {
+        const typeSpec = parseTypeSpec();
+        const name = expect(TokenType.IDENTIFIER, "variable name").value;
+        expect(TokenType.EQUALS, "'='");
+        const initializer = parseExpression();
+        expect(TokenType.SEMICOLON, "';' after for init");
+        init = { type: "VariableDeclaration", name, typeSpec, initializer };
+      } else {
+        const expression = parseExpression();
+        expect(TokenType.SEMICOLON, "';' after for init");
+        init = { type: "ExpressionStatement", expression };
+      }
+
+      const condition = parseExpression();
+      expect(TokenType.SEMICOLON, "';' after for condition");
+      const update = parseExpression();
+      expect(TokenType.RPAREN, "')' after for update");
+      const body = parseBlockOrStatement();
+      return { type: "ForStatement", init, condition, update, body };
+    }
+
+    // Expression statement
     const expression = parseExpression();
     expect(TokenType.SEMICOLON, "';' after expression statement");
     return { type: "ExpressionStatement", expression };
   }
 
-  /** Parse parameter list: type_spec IDENTIFIER (',' type_spec IDENTIFIER)* */
+  // ── Top-level parsing ─────────────────────────────────
+
   function parseParamList(): Parameter[] {
     const params: Parameter[] = [];
-    if (current().type === TokenType.RPAREN) {
-      return params; // empty param list
-    }
-    // First param
+    if (current().type === TokenType.RPAREN) return params;
     const firstType = parseTypeSpec();
     const firstName = expect(TokenType.IDENTIFIER, "parameter name").value;
     params.push({ type: "Parameter", name: firstName, typeSpec: firstType });
-
     while (current().type === TokenType.COMMA) {
-      pos++; // skip ','
+      pos++;
       const paramType = parseTypeSpec();
       const paramName = expect(TokenType.IDENTIFIER, "parameter name").value;
       params.push({ type: "Parameter", name: paramName, typeSpec: paramType });
     }
-
     return params;
   }
 
@@ -238,21 +314,12 @@ export function parse(tokens: Token[]): Program {
     const params = parseParamList();
     expect(TokenType.RPAREN, "')'");
     expect(TokenType.LBRACE, "'{'");
-
     const body: Statement[] = [];
     while (current().type !== TokenType.RBRACE && current().type !== TokenType.EOF) {
       body.push(parseStatement());
     }
-
     expect(TokenType.RBRACE, "'}'");
-
-    return {
-      type: "FunctionDeclaration",
-      name,
-      returnType,
-      params,
-      body,
-    };
+    return { type: "FunctionDeclaration", name, returnType, params, body };
   }
 
   function parseProgram(): Program {

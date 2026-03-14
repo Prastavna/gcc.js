@@ -5,9 +5,13 @@ const KEYWORDS: Record<string, TokenType> = {
   int: TokenType.INT,
   void: TokenType.VOID,
   return: TokenType.RETURN,
+  if: TokenType.IF,
+  else: TokenType.ELSE,
+  while: TokenType.WHILE,
+  for: TokenType.FOR,
 };
 
-const SINGLE_CHAR_TOKENS: Record<string, TokenType> = {
+const SIMPLE_TOKENS: Record<string, TokenType> = {
   "(": TokenType.LPAREN,
   ")": TokenType.RPAREN,
   "{": TokenType.LBRACE,
@@ -19,7 +23,6 @@ const SINGLE_CHAR_TOKENS: Record<string, TokenType> = {
   "*": TokenType.STAR,
   "/": TokenType.SLASH,
   "%": TokenType.PERCENT,
-  "=": TokenType.EQUALS,
 };
 
 function isDigit(ch: string): boolean {
@@ -43,6 +46,10 @@ export function tokenize(source: string): Token[] {
   let line = 1;
   let col = 1;
 
+  function peekChar(): string | undefined {
+    return source[pos + 1];
+  }
+
   while (pos < source.length) {
     const ch = source[pos];
 
@@ -58,10 +65,41 @@ export function tokenize(source: string): Token[] {
       continue;
     }
 
-    // Single-character tokens
-    const singleType = SINGLE_CHAR_TOKENS[ch];
-    if (singleType !== undefined) {
-      tokens.push({ type: singleType, value: ch, line, col });
+    // Two-character operators (must check before single-char)
+    if (ch === "=" && peekChar() === "=") {
+      tokens.push({ type: TokenType.EQ, value: "==", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "!" && peekChar() === "=") {
+      tokens.push({ type: TokenType.NEQ, value: "!=", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "<" && peekChar() === "=") {
+      tokens.push({ type: TokenType.LTE, value: "<=", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === ">" && peekChar() === "=") {
+      tokens.push({ type: TokenType.GTE, value: ">=", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "<") {
+      tokens.push({ type: TokenType.LT, value: "<", line, col });
+      pos++; col++; continue;
+    }
+    if (ch === ">") {
+      tokens.push({ type: TokenType.GT, value: ">", line, col });
+      pos++; col++; continue;
+    }
+
+    // Single-character tokens (= is now here, after == check)
+    if (ch === "=") {
+      tokens.push({ type: TokenType.EQUALS, value: "=", line, col });
+      pos++; col++; continue;
+    }
+
+    const simpleType = SIMPLE_TOKENS[ch];
+    if (simpleType !== undefined) {
+      tokens.push({ type: simpleType, value: ch, line, col });
       pos++;
       col++;
       continue;

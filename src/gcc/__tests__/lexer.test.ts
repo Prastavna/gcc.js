@@ -244,6 +244,42 @@ describe("lexer", () => {
     });
   });
 
+  describe("comparison and control flow tokens (milestone 5)", () => {
+    it("tokenizes == and !=", () => {
+      const tokens = tokenize("a == b != c");
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([
+        TokenType.IDENTIFIER, TokenType.EQ, TokenType.IDENTIFIER,
+        TokenType.NEQ, TokenType.IDENTIFIER,
+      ]);
+    });
+
+    it("tokenizes < > <= >=", () => {
+      const tokens = tokenize("a < b > c <= d >= e");
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([
+        TokenType.IDENTIFIER, TokenType.LT, TokenType.IDENTIFIER,
+        TokenType.GT, TokenType.IDENTIFIER, TokenType.LTE, TokenType.IDENTIFIER,
+        TokenType.GTE, TokenType.IDENTIFIER,
+      ]);
+    });
+
+    it("tokenizes = vs ==", () => {
+      const tokens = tokenize("x = y == z");
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([
+        TokenType.IDENTIFIER, TokenType.EQUALS, TokenType.IDENTIFIER,
+        TokenType.EQ, TokenType.IDENTIFIER,
+      ]);
+    });
+
+    it("tokenizes if/else/while/for keywords", () => {
+      const tokens = tokenize("if else while for");
+      const types = tokens.filter((t) => t.type !== TokenType.EOF).map((t) => t.type);
+      expect(types).toEqual([TokenType.IF, TokenType.ELSE, TokenType.WHILE, TokenType.FOR]);
+    });
+  });
+
   describe("error handling", () => {
     it("throws on unexpected characters", () => {
       expect(() => tokenize("int main() { return @; }")).toThrow();

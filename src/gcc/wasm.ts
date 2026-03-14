@@ -68,17 +68,46 @@ export const ValType = {
 
 /** WASM instruction opcodes */
 export const Op = {
-  CALL: 0x10,
+  // Control flow
+  BLOCK: 0x02,
+  LOOP: 0x03,
+  IF: 0x04,
+  ELSE: 0x05,
   END: 0x0b,
+  BR: 0x0c,
+  BR_IF: 0x0d,
+  RETURN: 0x0f,
+  CALL: 0x10,
+
+  // Variables
   LOCAL_GET: 0x20,
   LOCAL_SET: 0x21,
+
+  // Constants
   I32_CONST: 0x41,
+
+  // Comparison
+  I32_EQZ: 0x45,
+  I32_EQ: 0x46,
+  I32_NE: 0x47,
+  I32_LT_S: 0x48,
+  I32_GT_S: 0x4a,
+  I32_LE_S: 0x4c,
+  I32_GE_S: 0x4e,
+
+  // Arithmetic
   I32_ADD: 0x6a,
   I32_SUB: 0x6b,
   I32_MUL: 0x6c,
   I32_DIV_S: 0x6d,
   I32_REM_S: 0x6f,
 } as const;
+
+/** WASM block type: void (no result) */
+export const BLOCK_VOID = 0x40;
+
+/** WASM block type: i32 result */
+export const BLOCK_I32 = ValType.I32;
 
 /** WASM export kind */
 export const ExportKind = {

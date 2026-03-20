@@ -77,15 +77,18 @@ export function parse(tokens: Token[]): Program {
   }
 
   function isTypeSpec(): boolean {
-    return current().type === TokenType.INT || current().type === TokenType.VOID;
+    const t = current().type;
+    return t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG;
   }
 
   function parseTypeSpec(): TypeSpecifier {
     const tok = current();
     if (tok.type === TokenType.INT) { pos++; return "int"; }
     if (tok.type === TokenType.VOID) { pos++; return "void"; }
+    if (tok.type === TokenType.CHAR) { pos++; return "char"; }
+    if (tok.type === TokenType.LONG) { pos++; return "long"; }
     throw new Error(
-      `Expected type specifier (int/void) but got '${tok.value || tok.type}' at line ${tok.line}:${tok.col}`
+      `Expected type specifier (int/void/char/long) but got '${tok.value || tok.type}' at line ${tok.line}:${tok.col}`
     );
   }
 
@@ -319,6 +322,20 @@ export function parse(tokens: Token[]): Program {
       return { type: "StringLiteral", value: tok.value };
     }
 
+    if (tok.type === TokenType.CHAR_LITERAL) {
+      pos++;
+      return { type: "CharLiteral", value: parseInt(tok.value, 10) };
+    }
+
+    // sizeof(type)
+    if (tok.type === TokenType.SIZEOF) {
+      pos++;
+      expect(TokenType.LPAREN, "'(' after sizeof");
+      const targetType = parseTypeSpec();
+      expect(TokenType.RPAREN, "')' after sizeof type");
+      return { type: "SizeofExpression", targetType };
+    }
+
     if (tok.type === TokenType.IDENTIFIER) {
       const name = tok.value;
       pos++;
@@ -346,6 +363,14 @@ export function parse(tokens: Token[]): Program {
     }
 
     if (tok.type === TokenType.LPAREN) {
+      // Lookahead: if ( type_keyword ) then it's a cast
+      if (isTypeSpecToken(peek(1).type) && peek(2).type === TokenType.RPAREN) {
+        pos++; // skip (
+        const targetType = parseTypeSpec();
+        expect(TokenType.RPAREN, "')' after cast type");
+        const operand = parseUnary();
+        return { type: "CastExpression", targetType, operand };
+      }
       pos++;
       const expr = parseExpression();
       expect(TokenType.RPAREN, "')'");
@@ -355,6 +380,10 @@ export function parse(tokens: Token[]): Program {
     throw new Error(
       `Expected expression but got '${tok.value || tok.type}' at line ${tok.line}:${tok.col}`
     );
+  }
+
+  function isTypeSpecToken(t: TokenType): boolean {
+    return t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG;
   }
 
   // ── Statement parsing ─────────────────────────────────

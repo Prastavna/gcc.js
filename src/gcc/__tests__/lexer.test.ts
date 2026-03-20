@@ -456,4 +456,54 @@ describe("lexer", () => {
       expect(() => tokenize("int main() { return @; }")).toThrow();
     });
   });
+
+  describe("char, long, sizeof keywords and char literals", () => {
+    it("tokenizes char c = 'A';", () => {
+      const tokens = tokenize("char c = 'A';");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.CHAR, TokenType.IDENTIFIER, TokenType.EQUALS, TokenType.CHAR_LITERAL, TokenType.SEMICOLON,
+      ]);
+    });
+
+    it("tokenizes long x = 100;", () => {
+      const tokens = tokenize("long x = 100;");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.LONG, TokenType.IDENTIFIER, TokenType.EQUALS, TokenType.NUMBER, TokenType.SEMICOLON,
+      ]);
+    });
+
+    it("tokenizes sizeof(int)", () => {
+      const tokens = tokenize("sizeof(int)");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.SIZEOF, TokenType.LPAREN, TokenType.INT, TokenType.RPAREN,
+      ]);
+    });
+
+    it("char literal 'A' has value 65", () => {
+      const tokens = tokenize("'A'");
+      expect(tokens[0].type).toBe(TokenType.CHAR_LITERAL);
+      expect(tokens[0].value).toBe("65");
+    });
+
+    it("escape '\\n' has value 10", () => {
+      const tokens = tokenize("'\\n'");
+      expect(tokens[0].type).toBe(TokenType.CHAR_LITERAL);
+      expect(tokens[0].value).toBe("10");
+    });
+
+    it("escape '\\0' has value 0", () => {
+      const tokens = tokenize("'\\0'");
+      expect(tokens[0].type).toBe(TokenType.CHAR_LITERAL);
+      expect(tokens[0].value).toBe("0");
+    });
+
+    it("escape '\\\\' has value 92", () => {
+      const tokens = tokenize("'\\\\'");
+      expect(tokens[0].type).toBe(TokenType.CHAR_LITERAL);
+      expect(tokens[0].value).toBe("92");
+    });
+  });
 });

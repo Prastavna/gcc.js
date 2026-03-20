@@ -41,14 +41,14 @@ The lexer scans the source character-by-character and produces a flat array of t
 
 | Category    | Tokens |
 |-------------|--------|
-| Keywords    | `int`, `void`, `return`, `if`, `else`, `while`, `for` |
-| Literals    | integer (`42`), string (`"hello\n"`), identifiers (`main`) |
+| Keywords    | `int`, `void`, `char`, `long`, `sizeof`, `return`, `if`, `else`, `while`, `for` |
+| Literals    | integer (`42`), string (`"hello\n"`), char (`'A'`), identifiers (`main`) |
 | Operators   | `+`, `-`, `*`, `/`, `%`, `=` |
 | Comparison  | `==`, `!=`, `<`, `>`, `<=`, `>=` |
 | Pointer     | `&` |
 | Punctuation | `(`, `)`, `{`, `}`, `;`, `,` |
 
-Multi-character tokens (`==`, `!=`, `<=`, `>=`) use one-character lookahead. String literals handle escape sequences (`\n`, `\t`, `\r`, `\\`, `\"`, `\0`).
+Multi-character tokens (`==`, `!=`, `<=`, `>=`) use one-character lookahead. String literals handle escape sequences (`\n`, `\t`, `\r`, `\\`, `\"`, `\0`). Character literals (`'A'`, `'\n'`) produce `CHAR_LITERAL` tokens with the ASCII code as the value.
 
 Each token carries `type`, `value`, `line`, and `col`.
 
@@ -70,7 +70,7 @@ extern_decl    → type_spec IDENTIFIER '(' param_list? ')' ';'
 function_decl  → type_spec IDENTIFIER '(' param_list? ')' '{' statement* '}'
 param_list     → param (',' param)*
 param          → type_spec '*'? IDENTIFIER
-type_spec      → 'int' | 'void'
+type_spec      → 'int' | 'void' | 'char' | 'long'
 
 statement      → var_decl | return_stmt | if_stmt | while_stmt
                | for_stmt | expr_stmt
@@ -87,18 +87,24 @@ assignment     → '*' unary '=' assignment | IDENTIFIER '=' assignment | compar
 comparison     → additive (('==' | '!=' | '<' | '>' | '<=' | '>=') additive)*
 additive       → multiplicative (('+' | '-') multiplicative)*
 multiplicative → unary (('*' | '/' | '%') unary)*
-unary          → '-' unary | '*' unary | '&' IDENTIFIER | primary
-primary        → NUMBER | STRING | IDENTIFIER '(' arg_list? ')' | IDENTIFIER | '(' expression ')'
+unary          → '-' unary | '!' unary | '*' unary | '&' IDENTIFIER
+               | '++' IDENTIFIER | '--' IDENTIFIER | postfix
+postfix        → primary ('++' | '--')*
+primary        → NUMBER | STRING | CHAR_LITERAL | IDENTIFIER '(' arg_list? ')'
+               | IDENTIFIER '[' expression ']' | IDENTIFIER
+               | 'sizeof' '(' type_spec ')'
+               | '(' type_spec ')' unary            (cast)
+               | '(' expression ')'
 arg_list       → expression (',' expression)*
 ```
 
 ### AST Node Types
 
-**Expressions:** `IntegerLiteral`, `StringLiteral`, `Identifier`, `BinaryExpression`, `UnaryExpression`, `AssignmentExpression`, `CallExpression`, `AddressOfExpression`, `DereferenceExpression`, `DereferenceAssignment`
+**Expressions:** `IntegerLiteral`, `StringLiteral`, `CharLiteral`, `Identifier`, `BinaryExpression`, `UnaryExpression`, `AssignmentExpression`, `CompoundAssignmentExpression`, `CallExpression`, `AddressOfExpression`, `DereferenceExpression`, `DereferenceAssignment`, `LogicalExpression`, `TernaryExpression`, `UpdateExpression`, `ArrayAccessExpression`, `ArrayIndexAssignment`, `CastExpression`, `SizeofExpression`
 
-**Statements:** `ReturnStatement`, `VariableDeclaration`, `ExpressionStatement`, `IfStatement`, `WhileStatement`, `ForStatement`
+**Statements:** `ReturnStatement`, `VariableDeclaration`, `ArrayDeclaration`, `ExpressionStatement`, `IfStatement`, `WhileStatement`, `ForStatement`
 
-**Top-level:** `FunctionDeclaration`, `ExternFunctionDeclaration`, `Program`
+**Top-level:** `FunctionDeclaration`, `ExternFunctionDeclaration`, `GlobalVariableDeclaration`, `Program`
 
 ---
 
@@ -111,10 +117,11 @@ arg_list       → expression (',' expression)*
 
 | ID | Section  | When emitted |
 |----|----------|-------------|
-| 1  | Type     | Always — function signatures |
+| 1  | Type     | Always — function signatures (type-aware: i32/i64 params and returns) |
 | 2  | Import   | When extern functions exist |
 | 3  | Function | Always — maps func index → type index |
-| 5  | Memory   | When pointers or strings are used |
+| 5  | Memory   | When pointers, strings, or arrays are used |
+| 6  | Global   | When global variables exist |
 | 7  | Export   | Always — exports all local functions + memory |
 | 10 | Code     | Always — function bodies |
 | 11 | Data     | When string literals exist |
@@ -126,9 +133,27 @@ Imported functions occupy indices `0..N-1`, local functions `N..N+M-1`. This is 
 ### Variable storage strategy
 
 Variables are analyzed per-function:
-- **Address-taken** (`&x` appears): stored in WASM linear memory. Read = `i32.load`, write = `i32.store`.
+- **Address-taken** (`&x` appears): stored in WASM linear memory. Read/write use type-appropriate ops.
 - **Normal**: stored as WASM locals. Read = `local.get`, write = `local.set`.
 - **Parameters**: WASM locals `0..P-1`. Address-taken params are copied to memory at function entry.
+
+### Type system
+
+| C type | WASM local type | Memory ops | sizeof |
+|--------|----------------|------------|--------|
+| `char` | i32 | `i32.load8_s` / `i32.store8` | 1 |
+| `int`  | i32 | `i32.load` / `i32.store` | 4 |
+| `long` | i64 | `i64.load` / `i64.store` | 8 |
+
+**Type tracking:** The codegen maintains type maps (`localTypes`, `memVarTypes`, `globalTypes`, `funcReturnTypes`, `funcParamTypes`) to determine correct opcodes and conversions.
+
+**`emitExpression` returns `CType`** — callers use the returned type to insert conversions (`i64.extend_i32_s` or `i32.wrap_i64`) when needed.
+
+**`inferType(expr)`** — computes expression result type without emitting code, used for promotion decisions.
+
+**Promotion rule:** In binary ops, both operands are promoted to the wider type (char < int < long). Comparisons always return int.
+
+**Cast parsing:** `(type)expr` is disambiguated from `(expr)` by lookahead — if `(` followed by type keyword then `)`, it's a cast.
 
 ### Memory layout
 
@@ -151,6 +176,7 @@ Variables are analyzed per-function:
 WASM uses LEB128 (Little Endian Base 128) for variable-length integers:
 - `encodeUnsignedLEB128(value)` — for lengths, indices
 - `encodeSignedLEB128(value)` — for `i32.const` operands
+- `encodeSignedLEB128_i64(value)` — for `i64.const` operands (uses BigInt)
 
 ---
 
@@ -187,6 +213,6 @@ if (result.ok) {
 2. **Pure functions** — Each stage is `(input) => output` with no side effects.
 3. **No optimization passes** — Codegen emits naive but correct WASM.
 4. **Single-file compilation** — One C source string → one WASM module.
-5. **32-bit integers** — `int` maps to WASM `i32`. `long` → `i64` in future.
+5. **Multi-type support** — `char` and `int` map to WASM `i32`, `long` maps to `i64`. Type-aware codegen handles conversions automatically.
 6. **Memory only when needed** — Memory section is only emitted when pointers or strings are used, keeping simple programs minimal.
 7. **Address-taken analysis** — Only variables with `&` taken go to memory; others stay as fast WASM locals.

@@ -130,7 +130,7 @@ int main() {
 
 ## Phase 2: Towards C89
 
-### Milestone 8: More types and type casting
+### Milestone 8: More types and type casting [DONE]
 ```c
 int main() {
     char c = 'A';
@@ -139,12 +139,15 @@ int main() {
     return c + x;
 }
 ```
-- `char` type (8-bit, stored as i32 in WASM)
-- `long` type (mapped to i64 in WASM)
-- Character literals (`'A'`, `'\n'`)
-- Type casting (`(int)expr`, `(char)expr`)
-- Implicit int promotion in expressions
-- `sizeof` operator (compile-time constant)
+- [x] `char` type (8-bit in memory, i32 in WASM locals, sizeof=1)
+- [x] `long` type (i64 in WASM, 8 bytes in memory, sizeof=8)
+- [x] Character literals (`'A'`, `'\n'`, `'\0'`, `'\\'`)
+- [x] Type casting (`(int)expr`, `(char)expr`, `(long)expr`)
+- [x] Implicit int promotion in mixed expressions (int+long → long)
+- [x] `sizeof(type)` operator (compile-time constant)
+- [x] Type-aware function signatures (param/return types in WASM)
+- [x] Type-aware memory operations (i32.load8_s for char, i64.load/store for long)
+- [x] Argument type conversion in function calls
 
 ### Milestone 9: Arrays
 ```c

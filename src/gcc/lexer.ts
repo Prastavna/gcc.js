@@ -4,6 +4,9 @@ import type { Token } from "./types.ts";
 const KEYWORDS: Record<string, TokenType> = {
   int: TokenType.INT,
   void: TokenType.VOID,
+  char: TokenType.CHAR,
+  long: TokenType.LONG,
+  sizeof: TokenType.SIZEOF,
   return: TokenType.RETURN,
   if: TokenType.IF,
   else: TokenType.ELSE,
@@ -94,6 +97,35 @@ export function tokenize(source: string): Token[] {
       if (pos >= source.length) throw new Error(`Unterminated string at line ${line}, col ${startCol}`);
       pos++; col++; // skip closing quote
       tokens.push({ type: TokenType.STRING, value, line, col: startCol });
+      continue;
+    }
+
+    // Character literals
+    if (ch === "'") {
+      const startCol = col;
+      pos++; col++; // skip opening quote
+      let charCode: number;
+      if (pos >= source.length) throw new Error(`Unterminated character literal at line ${line}, col ${startCol}`);
+      if (source[pos] === '\\') {
+        pos++; col++;
+        if (pos >= source.length) throw new Error(`Unterminated character literal at line ${line}, col ${startCol}`);
+        const esc = source[pos];
+        switch (esc) {
+          case 'n': charCode = 10; break;
+          case 't': charCode = 9; break;
+          case 'r': charCode = 13; break;
+          case '\\': charCode = 92; break;
+          case '\'': charCode = 39; break;
+          case '0': charCode = 0; break;
+          default: charCode = esc.charCodeAt(0); break;
+        }
+      } else {
+        charCode = source[pos].charCodeAt(0);
+      }
+      pos++; col++;
+      if (pos >= source.length || source[pos] !== "'") throw new Error(`Unterminated character literal at line ${line}, col ${startCol}`);
+      pos++; col++; // skip closing quote
+      tokens.push({ type: TokenType.CHAR_LITERAL, value: String(charCode), line, col: startCol });
       continue;
     }
 

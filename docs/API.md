@@ -117,12 +117,42 @@ const wasmBytes = generate(ast);
 
 ---
 
-## Supported C Subset (Milestone 1)
+## Supported C Subset (through Milestone 8)
 
-```c
-int main() {
-  return <integer_literal>;
-}
-```
+### Types
+- `int` (32-bit signed), `char` (8-bit signed), `long` (64-bit signed), `void`
+- Type casting: `(int)expr`, `(char)expr`, `(long)expr`
+- `sizeof(type)` — compile-time constant (char=1, int=4, long=8)
+- Implicit promotion in mixed expressions (int+long → long)
 
-That's it. Arithmetic, variables, control flow, and more come in later milestones. See [PLAN.md](./PLAN.md) for the roadmap.
+### Literals
+- Integer: `42`, `0`, `-1`
+- Character: `'A'`, `'\n'`, `'\0'`, `'\t'`
+- String: `"hello\n"`
+
+### Declarations
+- Functions: `int add(int a, int b) { ... }`
+- Extern functions: `int printf(int ptr);`
+- Local variables: `int x = 10;`, `char c = 'A';`, `long big = 100000;`
+- Global variables: `int counter = 0;`
+- Arrays: `int arr[5] = {1, 2, 3, 4, 5};`
+- Pointer variables: `int *p = &x;`
+
+### Expressions
+- Arithmetic: `+`, `-`, `*`, `/`, `%`
+- Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
+- Logical: `&&`, `||`, `!`
+- Ternary: `a ? b : c`
+- Assignment: `x = val`, `x += val`, `x -= val`, etc.
+- Increment/decrement: `++x`, `x++`, `--x`, `x--`
+- Pointers: `&x`, `*p`, `*p = val`
+- Arrays: `arr[i]`, `arr[i] = val`
+- Function calls: `add(3, 4)`
+
+### Statements
+- `return expr;`
+- `if (cond) { ... } else { ... }`
+- `while (cond) { ... }`
+- `for (init; cond; update) { ... }`
+
+See [PLAN.md](./PLAN.md) for the full roadmap.

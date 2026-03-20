@@ -42,6 +42,27 @@ export function encodeSignedLEB128(value: number): number[] {
   return result;
 }
 
+/**
+ * Encode a signed 64-bit integer in LEB128 format.
+ * Uses BigInt for 64-bit precision.
+ */
+export function encodeSignedLEB128_i64(value: number | bigint): number[] {
+  let val = BigInt(value);
+  const result: number[] = [];
+  let more = true;
+  while (more) {
+    let byte = Number(val & 0x7fn);
+    val >>= 7n;
+    if ((val === 0n && (byte & 0x40) === 0) || (val === -1n && (byte & 0x40) !== 0)) {
+      more = false;
+    } else {
+      byte |= 0x80;
+    }
+    result.push(byte);
+  }
+  return result;
+}
+
 // ── WASM constants ───────────────────────────────────────────
 
 /** WASM magic number: \0asm */
@@ -96,8 +117,9 @@ export const Op = {
 
   // Constants
   I32_CONST: 0x41,
+  I64_CONST: 0x42,
 
-  // Comparison
+  // Comparison (i32)
   I32_EQZ: 0x45,
   I32_EQ: 0x46,
   I32_NE: 0x47,
@@ -106,16 +128,42 @@ export const Op = {
   I32_LE_S: 0x4c,
   I32_GE_S: 0x4e,
 
-  // Memory
+  // Comparison (i64)
+  I64_EQZ: 0x50,
+  I64_EQ: 0x51,
+  I64_NE: 0x52,
+  I64_LT_S: 0x53,
+  I64_GT_S: 0x55,
+  I64_LE_S: 0x57,
+  I64_GE_S: 0x59,
+
+  // Memory (i32)
   I32_LOAD: 0x28,
   I32_STORE: 0x36,
+  I32_LOAD8_S: 0x2c,
+  I32_STORE8: 0x3a,
 
-  // Arithmetic
+  // Memory (i64)
+  I64_LOAD: 0x29,
+  I64_STORE: 0x37,
+
+  // Arithmetic (i32)
   I32_ADD: 0x6a,
   I32_SUB: 0x6b,
   I32_MUL: 0x6c,
   I32_DIV_S: 0x6d,
   I32_REM_S: 0x6f,
+
+  // Arithmetic (i64)
+  I64_ADD: 0x7c,
+  I64_SUB: 0x7d,
+  I64_MUL: 0x7e,
+  I64_DIV_S: 0x7f,
+  I64_REM_S: 0x81,
+
+  // Conversions
+  I32_WRAP_I64: 0xa7,
+  I64_EXTEND_I32_S: 0xac,
 } as const;
 
 /** WASM block type: void (no result) */
@@ -123,6 +171,9 @@ export const BLOCK_VOID = 0x40;
 
 /** WASM block type: i32 result */
 export const BLOCK_I32 = ValType.I32;
+
+/** WASM block type: i64 result */
+export const BLOCK_I64 = ValType.I64;
 
 /** WASM export kind */
 export const ExportKind = {

@@ -1490,4 +1490,100 @@ describe("integration: compile() end-to-end", () => {
       expect(typeof result.ok).toBe("boolean");
     });
   });
+
+  describe("types: char, long, sizeof, casts", () => {
+    it("char c = 'A'; return c; → 65", async () => {
+      const instance = await compileAndInstantiate("int main() { char c = 'A'; return c; }");
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(65);
+    });
+
+    it("char c = '\\n'; return c; → 10", async () => {
+      const instance = await compileAndInstantiate("int main() { char c = '\\n'; return c; }");
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(10);
+    });
+
+    it("sizeof(char) → 1", async () => {
+      const instance = await compileAndInstantiate("int main() { return sizeof(char); }");
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(1);
+    });
+
+    it("sizeof(int) → 4", async () => {
+      const instance = await compileAndInstantiate("int main() { return sizeof(int); }");
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(4);
+    });
+
+    it("sizeof(long) → 8", async () => {
+      const instance = await compileAndInstantiate("int main() { return sizeof(long); }");
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(8);
+    });
+
+    it("long x = 100000; return (int)x; → 100000", async () => {
+      const instance = await compileAndInstantiate("int main() { long x = 100000; return (int)x; }");
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(100000);
+    });
+
+    it("long a = 10; long b = 20; return (int)(a + b); → 30", async () => {
+      const instance = await compileAndInstantiate("int main() { long a = 10; long b = 20; return (int)(a + b); }");
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(30);
+    });
+
+    it("int x = 5; long y = (long)x; return (int)y; → 5", async () => {
+      const instance = await compileAndInstantiate("int main() { int x = 5; long y = (long)x; return (int)y; }");
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(5);
+    });
+
+    it("mixed: int a = 10; long b = 20; return (int)(a + b); → 30 (implicit promotion)", async () => {
+      const instance = await compileAndInstantiate("int main() { int a = 10; long b = 20; return (int)(a + b); }");
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(30);
+    });
+
+    it("char c = 'A'; return c + 1; → 66", async () => {
+      const instance = await compileAndInstantiate("int main() { char c = 'A'; return c + 1; }");
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(66);
+    });
+
+    it("target program: char c = 'A'; long big = 100000; int x = (int)big; return c + x; → 100065", async () => {
+      const instance = await compileAndInstantiate(`
+        int main() {
+          char c = 'A';
+          long big = 100000;
+          int x = (int)big;
+          return c + x;
+        }
+      `);
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(100065);
+    });
+
+    it("long function return type", async () => {
+      const instance = await compileAndInstantiate(`
+        long add_long(long a, long b) { return a + b; }
+        int main() { return (int)add_long(100, 200); }
+      `);
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(300);
+    });
+
+    it("cast char to long and back", async () => {
+      const instance = await compileAndInstantiate(`
+        int main() {
+          char c = 'Z';
+          long big = (long)c;
+          return (int)big;
+        }
+      `);
+      const main = instance.exports.main as () => number;
+      expect(main()).toBe(90);
+    });
+  });
 });

@@ -4,6 +4,9 @@ export const TokenType = {
   // Keywords
   INT: "INT",
   VOID: "VOID",
+  CHAR: "CHAR",
+  LONG: "LONG",
+  SIZEOF: "SIZEOF",
   RETURN: "RETURN",
   IF: "IF",
   ELSE: "ELSE",
@@ -13,6 +16,7 @@ export const TokenType = {
   // Literals
   NUMBER: "NUMBER",
   STRING: "STRING",
+  CHAR_LITERAL: "CHAR_LITERAL",
   IDENTIFIER: "IDENTIFIER",
 
   // Punctuation
@@ -79,7 +83,7 @@ export interface Token {
 
 // ── AST Node Types ───────────────────────────────────────────
 
-export type TypeSpecifier = "int" | "void";
+export type TypeSpecifier = "int" | "void" | "char" | "long";
 
 export interface IntegerLiteral {
   type: "IntegerLiteral";
@@ -196,9 +200,29 @@ export interface ArrayIndexAssignment {
   value: Expression;
 }
 
+/** 'A' — character literal with ASCII value */
+export interface CharLiteral {
+  type: "CharLiteral";
+  value: number;
+}
+
+/** (type)expr — type cast expression */
+export interface CastExpression {
+  type: "CastExpression";
+  targetType: TypeSpecifier;
+  operand: Expression;
+}
+
+/** sizeof(type) — compile-time size constant */
+export interface SizeofExpression {
+  type: "SizeofExpression";
+  targetType: TypeSpecifier;
+}
+
 export type Expression =
   | IntegerLiteral
   | StringLiteral
+  | CharLiteral
   | BinaryExpression
   | UnaryExpression
   | Identifier
@@ -212,7 +236,9 @@ export type Expression =
   | UpdateExpression
   | CompoundAssignmentExpression
   | ArrayAccessExpression
-  | ArrayIndexAssignment;
+  | ArrayIndexAssignment
+  | CastExpression
+  | SizeofExpression;
 
 export interface ReturnStatement {
   type: "ReturnStatement";

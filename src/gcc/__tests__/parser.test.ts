@@ -529,4 +529,48 @@ describe("parser", () => {
       }
     });
   });
+
+  describe("char, long, cast, sizeof", () => {
+    it("parses char c = 'A';", () => {
+      const ast = parseSource("int main() { char c = 'A'; return c; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const decl = func.body[0] as any;
+      expect(decl.type).toBe("VariableDeclaration");
+      expect(decl.typeSpec).toBe("char");
+      expect(decl.initializer.type).toBe("CharLiteral");
+      expect(decl.initializer.value).toBe(65);
+    });
+
+    it("parses long x = 100;", () => {
+      const ast = parseSource("int main() { long x = 100; return 0; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const decl = func.body[0] as any;
+      expect(decl.type).toBe("VariableDeclaration");
+      expect(decl.typeSpec).toBe("long");
+    });
+
+    it("parses (int)x as CastExpression", () => {
+      const ast = parseSource("int main() { long x = 5; return (int)x; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const ret = func.body[1] as any;
+      expect(ret.expression.type).toBe("CastExpression");
+      expect(ret.expression.targetType).toBe("int");
+      expect(ret.expression.operand.type).toBe("Identifier");
+    });
+
+    it("parses sizeof(int) as SizeofExpression", () => {
+      const ast = parseSource("int main() { return sizeof(int); }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const ret = func.body[0] as any;
+      expect(ret.expression.type).toBe("SizeofExpression");
+      expect(ret.expression.targetType).toBe("int");
+    });
+
+    it("(x + 1) still parses as parenthesized expr", () => {
+      const ast = parseSource("int main() { int x = 5; return (x + 1); }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const ret = func.body[1] as any;
+      expect(ret.expression.type).toBe("BinaryExpression");
+    });
+  });
 });

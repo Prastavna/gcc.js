@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-gcc.js is a client-side C-to-WebAssembly compiler written in pure TypeScript. It takes C source code as a string and produces a runnable WASM module. No Emscripten, no native dependencies.
+gcc.js is a client-side C-to-WebAssembly compiler written in pure TypeScript. It takes C source code as a string and produces a runnable WASM module. No Emscripten, no native dependencies. There is playground web application as well written in pure TypeScript to try out the library.
 
 ## Build & Test
 
@@ -82,16 +82,3 @@ Integration tests compile C source and run the resulting WASM module, checking r
 
 Keep all three docs updated when implementing new features.
 
-## Current State
-
-Milestones 1-8 are complete. The compiler supports:
-- Types: `int`, `char`, `long`, `void` with casting and sizeof
-- Expressions: arithmetic, comparison, logical, ternary, assignment, compound assignment, increment/decrement
-- Control flow: `if`/`else`, `while`, `for`
-- Functions: declarations, parameters, calls, extern imports
-- Pointers: `&x`, `*p`, `*p = val`
-- Arrays: `int arr[5]`, `arr[i]`, `arr[i] = val`, initializers
-- Strings: string literals in memory, escape sequences
-- Global variables
-
-Next milestone: Milestone 9 (Structs). See `docs/PLAN.md`.

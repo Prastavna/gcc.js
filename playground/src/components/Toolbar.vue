@@ -73,6 +73,18 @@ const examples: { label: string; code: string }[] = [
     label: 'Hello World',
     code: `int printf(int ptr);\n\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}`,
   },
+  {
+    label: 'Arrays',
+    code: `int main() {\n    int arr[5] = {1, 2, 3, 4, 5};\n    int sum = 0;\n    for (int i = 0; i < 5; i++) {\n        sum += arr[i];\n    }\n    return sum;\n}`,
+  },
+  {
+    label: 'Structs',
+    code: `struct Point { int x; int y; };\n\nint distance_sq(struct Point p) {\n    return p.x * p.x + p.y * p.y;\n}\n\nint main() {\n    struct Point p;\n    p.x = 3;\n    p.y = 4;\n    return distance_sq(p);\n}`,
+  },
+  {
+    label: 'Struct pointers',
+    code: `struct Point { int x; int y; };\n\nvoid set_point(struct Point *p, int x, int y) {\n    p->x = x;\n    p->y = y;\n}\n\nint main() {\n    struct Point p;\n    set_point(&p, 5, 7);\n    return p.x + p.y;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

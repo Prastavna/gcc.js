@@ -327,6 +327,130 @@ describe("lexer", () => {
     });
   });
 
+  describe("logical operators (milestone 8)", () => {
+    it("tokenizes && and ||", () => {
+      const tokens = tokenize("a && b || c");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.IDENTIFIER, TokenType.AND_AND,
+        TokenType.IDENTIFIER, TokenType.PIPE_PIPE,
+        TokenType.IDENTIFIER,
+      ]);
+    });
+
+    it("tokenizes !", () => {
+      const tokens = tokenize("!x");
+      expect(tokens[0].type).toBe(TokenType.BANG);
+      expect(tokens[1].type).toBe(TokenType.IDENTIFIER);
+    });
+
+    it("distinguishes ! from !=", () => {
+      const tokens = tokenize("!x != y");
+      expect(tokens[0].type).toBe(TokenType.BANG);
+      expect(tokens[2].type).toBe(TokenType.NEQ);
+    });
+
+    it("distinguishes & from &&", () => {
+      const tokens = tokenize("&x && y");
+      expect(tokens[0].type).toBe(TokenType.AMPERSAND);
+      expect(tokens[2].type).toBe(TokenType.AND_AND);
+    });
+  });
+
+  describe("ternary operator (milestone 8)", () => {
+    it("tokenizes ? and :", () => {
+      const tokens = tokenize("a ? b : c");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.IDENTIFIER, TokenType.QUESTION,
+        TokenType.IDENTIFIER, TokenType.COLON,
+        TokenType.IDENTIFIER,
+      ]);
+    });
+  });
+
+  describe("increment/decrement (milestone 8)", () => {
+    it("tokenizes ++ and --", () => {
+      const tokens = tokenize("x++ + --y");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.IDENTIFIER, TokenType.PLUS_PLUS,
+        TokenType.PLUS,
+        TokenType.MINUS_MINUS, TokenType.IDENTIFIER,
+      ]);
+    });
+
+    it("distinguishes ++ from + +", () => {
+      const t1 = tokenize("x++");
+      expect(t1[1].type).toBe(TokenType.PLUS_PLUS);
+
+      const t2 = tokenize("x + +y");
+      expect(t2[1].type).toBe(TokenType.PLUS);
+      expect(t2[2].type).toBe(TokenType.PLUS);
+    });
+  });
+
+  describe("compound assignment (milestone 8)", () => {
+    it("tokenizes +=, -=, *=, /=, %=", () => {
+      const tokens = tokenize("a += b -= c *= d /= e %= f");
+      const ops = tokens.filter(t =>
+        t.type === TokenType.PLUS_EQUALS || t.type === TokenType.MINUS_EQUALS ||
+        t.type === TokenType.STAR_EQUALS || t.type === TokenType.SLASH_EQUALS ||
+        t.type === TokenType.PERCENT_EQUALS
+      );
+      expect(ops.map(t => t.value)).toEqual(["+=", "-=", "*=", "/=", "%="]);
+    });
+
+    it("distinguishes += from + =", () => {
+      const t1 = tokenize("x += 1");
+      expect(t1[1].type).toBe(TokenType.PLUS_EQUALS);
+    });
+  });
+
+  describe("comments (milestone 8)", () => {
+    it("skips single-line comments", () => {
+      const tokens = tokenize("int x = 5; // this is a comment\nreturn x;");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.INT, TokenType.IDENTIFIER, TokenType.EQUALS, TokenType.NUMBER, TokenType.SEMICOLON,
+        TokenType.RETURN, TokenType.IDENTIFIER, TokenType.SEMICOLON,
+      ]);
+    });
+
+    it("skips multi-line comments", () => {
+      const tokens = tokenize("int x = /* a comment */ 5;");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.INT, TokenType.IDENTIFIER, TokenType.EQUALS, TokenType.NUMBER, TokenType.SEMICOLON,
+      ]);
+    });
+
+    it("handles multi-line comment spanning lines", () => {
+      const tokens = tokenize("int x = 1;\n/* line 1\nline 2\n*/\nint y = 2;");
+      const idents = tokens.filter(t => t.type === TokenType.IDENTIFIER);
+      expect(idents.map(t => t.value)).toEqual(["x", "y"]);
+    });
+  });
+
+  describe("bracket tokens (milestone 9 - arrays)", () => {
+    it("tokenizes [ and ]", () => {
+      const tokens = tokenize("arr[0]");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.IDENTIFIER, TokenType.LBRACKET, TokenType.NUMBER, TokenType.RBRACKET,
+      ]);
+    });
+
+    it("tokenizes array declaration", () => {
+      const tokens = tokenize("int arr[5];");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.INT, TokenType.IDENTIFIER, TokenType.LBRACKET, TokenType.NUMBER,
+        TokenType.RBRACKET, TokenType.SEMICOLON,
+      ]);
+    });
+  });
+
   describe("error handling", () => {
     it("throws on unexpected characters", () => {
       expect(() => tokenize("int main() { return @; }")).toThrow();

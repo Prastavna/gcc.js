@@ -681,6 +681,797 @@ describe("integration: compile() end-to-end", () => {
     });
   });
 
+  describe("logical operators (milestone 8)", () => {
+    it("&& returns 1 when both true", async () => {
+      const source = `
+        int main() {
+          int x = 5;
+          int y = 3;
+          if (x > 0 && y > 0) return 1;
+          return 0;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("&& returns 0 when left is false (short-circuit)", async () => {
+      const source = `
+        int main() {
+          int x = 0;
+          if (x && 1) return 1;
+          return 0;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(0);
+    });
+
+    it("&& returns 0 when right is false", async () => {
+      const source = `
+        int main() {
+          if (1 && 0) return 1;
+          return 0;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(0);
+    });
+
+    it("|| returns 1 when left is true (short-circuit)", async () => {
+      const source = `
+        int main() {
+          if (1 || 0) return 1;
+          return 0;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("|| returns 1 when right is true", async () => {
+      const source = `
+        int main() {
+          if (0 || 1) return 1;
+          return 0;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("|| returns 0 when both false", async () => {
+      const source = `
+        int main() {
+          if (0 || 0) return 1;
+          return 0;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(0);
+    });
+
+    it("! negates truthy to 0", async () => {
+      const source = "int main() { return !5; }";
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(0);
+    });
+
+    it("! negates 0 to 1", async () => {
+      const source = "int main() { return !0; }";
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("double negation !!x", async () => {
+      const source = "int main() { return !!42; }";
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("complex: x > 0 && x < 10", async () => {
+      const source = `
+        int in_range(int x) {
+          if (x > 0 && x < 10) return 1;
+          return 0;
+        }
+        int main() { return in_range(5); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("complex: x == 0 || x == 5", async () => {
+      const source = `
+        int check(int x) {
+          if (x == 0 || x == 5) return 1;
+          return 0;
+        }
+        int main() { return check(5); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("&& has higher precedence than ||", async () => {
+      // 1 || 0 && 0 should be 1 (because && binds tighter: 1 || (0 && 0) = 1 || 0 = 1)
+      const source = "int main() { return 1 || 0 && 0; }";
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("&& short-circuits: does not evaluate right when left is 0", async () => {
+      // If short-circuit works, the division by zero never happens
+      const source = `
+        int main() {
+          int x = 0;
+          if (x && (10 / x > 0)) return 1;
+          return 42;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("|| short-circuits: does not evaluate right when left is nonzero", async () => {
+      const source = `
+        int main() {
+          int x = 1;
+          if (x || (10 / 0 > 0)) return 42;
+          return 0;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+  });
+
+  describe("ternary operator (milestone 8)", () => {
+    it("condition true: returns consequent", async () => {
+      const source = "int main() { return 1 ? 42 : 99; }";
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("condition false: returns alternate", async () => {
+      const source = "int main() { return 0 ? 42 : 99; }";
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(99);
+    });
+
+    it("ternary with comparison condition", async () => {
+      const source = `
+        int abs(int x) {
+          return x >= 0 ? x : -x;
+        }
+        int main() { return abs(-7); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+
+    it("ternary with variable", async () => {
+      const source = `
+        int main() {
+          int x = 5;
+          int y = x > 3 ? x * 2 : x + 1;
+          return y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+
+    it("nested ternary", async () => {
+      const source = `
+        int classify(int x) {
+          return x > 0 ? 1 : x < 0 ? -1 : 0;
+        }
+        int main() { return classify(0); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(0);
+    });
+
+    it("ternary in function argument", async () => {
+      const source = `
+        int identity(int x) { return x; }
+        int main() {
+          int x = 1;
+          return identity(x ? 42 : 0);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+  });
+
+  describe("increment/decrement (milestone 8)", () => {
+    it("prefix ++x returns new value", async () => {
+      const source = `
+        int main() {
+          int x = 5;
+          return ++x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(6);
+    });
+
+    it("postfix x++ returns old value", async () => {
+      const source = `
+        int main() {
+          int x = 5;
+          return x++;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("postfix x++ actually increments", async () => {
+      const source = `
+        int main() {
+          int x = 5;
+          x++;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(6);
+    });
+
+    it("prefix --x returns new value", async () => {
+      const source = `
+        int main() {
+          int x = 5;
+          return --x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(4);
+    });
+
+    it("postfix x-- returns old value", async () => {
+      const source = `
+        int main() {
+          int x = 5;
+          return x--;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("postfix x-- actually decrements", async () => {
+      const source = `
+        int main() {
+          int x = 5;
+          x--;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(4);
+    });
+
+    it("++x in for loop", async () => {
+      const source = `
+        int main() {
+          int sum = 0;
+          for (int i = 0; i < 5; ++i) {
+            sum = sum + i;
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 0+1+2+3+4 = 10
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+
+    it("i++ in for loop", async () => {
+      const source = `
+        int main() {
+          int sum = 0;
+          for (int i = 0; i < 5; i++) {
+            sum = sum + i;
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+  });
+
+  describe("compound assignment (milestone 8)", () => {
+    it("x += 5", async () => {
+      const source = `
+        int main() {
+          int x = 10;
+          x += 5;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(15);
+    });
+
+    it("x -= 3", async () => {
+      const source = `
+        int main() {
+          int x = 10;
+          x -= 3;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+
+    it("x *= 4", async () => {
+      const source = `
+        int main() {
+          int x = 5;
+          x *= 4;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(20);
+    });
+
+    it("x /= 2", async () => {
+      const source = `
+        int main() {
+          int x = 10;
+          x /= 2;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("x %= 3", async () => {
+      const source = `
+        int main() {
+          int x = 10;
+          x %= 3;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("compound in loop: sum += i", async () => {
+      const source = `
+        int main() {
+          int sum = 0;
+          for (int i = 1; i <= 10; i++) {
+            sum += i;
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(55);
+    });
+
+    it("chained compound: x += 1; x *= 3", async () => {
+      const source = `
+        int main() {
+          int x = 2;
+          x += 1;
+          x *= 3;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // (2+1)*3 = 9
+      expect((instance.exports.main as () => number)()).toBe(9);
+    });
+  });
+
+  describe("comments (milestone 8)", () => {
+    it("single-line comment is ignored", async () => {
+      const source = `
+        int main() {
+          // this is a comment
+          return 42;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("multi-line comment is ignored", async () => {
+      const source = `
+        int main() {
+          /* this is
+             a multi-line
+             comment */
+          return 42;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("comment after code on same line", async () => {
+      const source = `
+        int main() {
+          int x = 10; // set x
+          return x; // done
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+  });
+
+  describe("combined milestone 8 features", () => {
+    it("FizzBuzz-style classification using all features", async () => {
+      const source = `
+        int classify(int n) {
+          int r = n % 3 == 0 && n % 5 == 0 ? 3
+                : n % 3 == 0 ? 1
+                : n % 5 == 0 ? 2
+                : 0;
+          return r;
+        }
+        int main() { return classify(15); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+
+    it("loop with ++, +=, &&", async () => {
+      const source = `
+        int main() {
+          int sum = 0;
+          int count = 0;
+          for (int i = 0; i < 20; i++) {
+            if (i % 2 == 0 && i > 0) {
+              sum += i;
+              count++;
+            }
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // even numbers > 0 and < 20: 2+4+6+8+10+12+14+16+18 = 90
+      expect((instance.exports.main as () => number)()).toBe(90);
+    });
+
+    it("ternary used as initializer", async () => {
+      const source = `
+        int main() {
+          int x = 10;
+          int sign = x > 0 ? 1 : x < 0 ? -1 : 0;
+          return sign;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("logical not combined with ternary", async () => {
+      const source = `
+        int main() {
+          int x = 0;
+          return !x ? 42 : 0;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+  });
+
+  describe("global variables (milestone 9)", () => {
+    it("basic global variable read", async () => {
+      const source = `
+        int counter = 42;
+        int main() { return counter; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("global variable write", async () => {
+      const source = `
+        int counter = 0;
+        int main() {
+          counter = 10;
+          return counter;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+
+    it("global modified by function", async () => {
+      const source = `
+        int counter = 0;
+        void increment() { counter = counter + 1; }
+        int main() {
+          increment();
+          increment();
+          increment();
+          return counter;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+
+    it("global with compound assignment", async () => {
+      const source = `
+        int total = 0;
+        int main() {
+          total += 10;
+          total += 20;
+          return total;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(30);
+    });
+
+    it("global with ++", async () => {
+      const source = `
+        int count = 0;
+        int main() {
+          count++;
+          count++;
+          count++;
+          return count;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+
+    it("global prefix ++ returns new value", async () => {
+      const source = `
+        int x = 5;
+        int main() { return ++x; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(6);
+    });
+
+    it("global postfix ++ returns old value", async () => {
+      const source = `
+        int x = 5;
+        int main() { return x++; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("multiple global variables", async () => {
+      const source = `
+        int x = 10;
+        int y = 20;
+        int main() { return x + y; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(30);
+    });
+
+    it("global and local with same logic", async () => {
+      const source = `
+        int g = 100;
+        int main() {
+          int l = 50;
+          return g + l;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(150);
+    });
+
+    it("global shared between functions", async () => {
+      const source = `
+        int state = 0;
+        void set_state(int v) { state = v; }
+        int get_state() { return state; }
+        int main() {
+          set_state(42);
+          return get_state();
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("global counter with loop", async () => {
+      const source = `
+        int sum = 0;
+        int main() {
+          for (int i = 1; i <= 10; i++) {
+            sum += i;
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(55);
+    });
+
+    it("global initialized to zero", async () => {
+      const source = `
+        int x = 0;
+        int main() { return x; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(0);
+    });
+
+    it("global with negative initializer", async () => {
+      const source = `
+        int x = -1;
+        int main() { return x; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect(((instance.exports.main as () => number)()) | 0).toBe(-1);
+    });
+
+    it("global state persists across function calls", async () => {
+      const source = `
+        int calls = 0;
+        int count_call() {
+          calls++;
+          return calls;
+        }
+        int main() {
+          count_call();
+          count_call();
+          return count_call();
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+  });
+
+  describe("arrays (milestone 9)", () => {
+    it("basic array write and read", async () => {
+      const source = `
+        int main() {
+          int arr[5];
+          arr[0] = 10;
+          return arr[0];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+
+    it("multiple array indices", async () => {
+      const source = `
+        int main() {
+          int arr[5];
+          arr[0] = 10;
+          arr[1] = 20;
+          return arr[0] + arr[1];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(30);
+    });
+
+    it("array initializer", async () => {
+      const source = `
+        int main() {
+          int arr[3] = {1, 2, 3};
+          return arr[0] + arr[1] + arr[2];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(6);
+    });
+
+    it("array in for loop", async () => {
+      const source = `
+        int main() {
+          int arr[5];
+          for (int i = 0; i < 5; i++) {
+            arr[i] = i * 10;
+          }
+          return arr[0] + arr[1] + arr[2] + arr[3] + arr[4];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 0 + 10 + 20 + 30 + 40 = 100
+      expect((instance.exports.main as () => number)()).toBe(100);
+    });
+
+    it("array with computed index", async () => {
+      const source = `
+        int main() {
+          int arr[5] = {10, 20, 30, 40, 50};
+          int i = 2;
+          return arr[i + 1];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(40);
+    });
+
+    it("array name decays to pointer (passed to function)", async () => {
+      const source = `
+        int sum_first_two(int *p) {
+          return *p;
+        }
+        int main() {
+          int arr[3] = {42, 10, 20};
+          return sum_first_two(arr);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("array sum with loop", async () => {
+      const source = `
+        int main() {
+          int arr[5] = {1, 2, 3, 4, 5};
+          int sum = 0;
+          for (int i = 0; i < 5; i++) {
+            sum += arr[i];
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(15);
+    });
+
+    it("array modified in loop then read", async () => {
+      const source = `
+        int main() {
+          int arr[3];
+          arr[0] = 1;
+          arr[1] = arr[0] + 1;
+          arr[2] = arr[1] + 1;
+          return arr[2];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+
+    it("two arrays in same function", async () => {
+      const source = `
+        int main() {
+          int a[3] = {1, 2, 3};
+          int b[3] = {10, 20, 30};
+          return a[2] + b[2];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(33);
+    });
+
+    it("array with expression initializers", async () => {
+      const source = `
+        int main() {
+          int x = 5;
+          int arr[3] = {x, x + 1, x * 2};
+          return arr[0] + arr[1] + arr[2];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 5 + 6 + 10 = 21
+      expect((instance.exports.main as () => number)()).toBe(21);
+    });
+  });
+
   describe("error cases", () => {
     it("returns errors for invalid syntax", () => {
       const result = compile("this is not C code");

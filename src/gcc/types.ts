@@ -20,6 +20,8 @@ export const TokenType = {
   RPAREN: "RPAREN",
   LBRACE: "LBRACE",
   RBRACE: "RBRACE",
+  LBRACKET: "LBRACKET",
+  RBRACKET: "RBRACKET",
   SEMICOLON: "SEMICOLON",
   COMMA: "COMMA",
 
@@ -41,6 +43,26 @@ export const TokenType = {
   GT: "GT",        // >
   LTE: "LTE",     // <=
   GTE: "GTE",     // >=
+
+  // Logical operators
+  BANG: "BANG",           // !
+  AND_AND: "AND_AND",    // &&
+  PIPE_PIPE: "PIPE_PIPE", // ||
+
+  // Ternary
+  QUESTION: "QUESTION",  // ?
+  COLON: "COLON",        // :
+
+  // Increment/decrement
+  PLUS_PLUS: "PLUS_PLUS",     // ++
+  MINUS_MINUS: "MINUS_MINUS", // --
+
+  // Compound assignment
+  PLUS_EQUALS: "PLUS_EQUALS",       // +=
+  MINUS_EQUALS: "MINUS_EQUALS",     // -=
+  STAR_EQUALS: "STAR_EQUALS",       // *=
+  SLASH_EQUALS: "SLASH_EQUALS",     // /=
+  PERCENT_EQUALS: "PERCENT_EQUALS", // %=
 
   // Special
   EOF: "EOF",
@@ -79,7 +101,7 @@ export interface BinaryExpression {
   right: Expression;
 }
 
-export type UnaryOperator = "-";
+export type UnaryOperator = "-" | "!";
 
 export interface UnaryExpression {
   type: "UnaryExpression";
@@ -123,6 +145,57 @@ export interface DereferenceAssignment {
   value: Expression;
 }
 
+/** && or || — short-circuit logical operators */
+export type LogicalOperator = "&&" | "||";
+
+export interface LogicalExpression {
+  type: "LogicalExpression";
+  operator: LogicalOperator;
+  left: Expression;
+  right: Expression;
+}
+
+/** a ? b : c — ternary conditional */
+export interface TernaryExpression {
+  type: "TernaryExpression";
+  condition: Expression;
+  consequent: Expression;
+  alternate: Expression;
+}
+
+/** ++x, x++, --x, x-- — prefix/postfix increment/decrement */
+export interface UpdateExpression {
+  type: "UpdateExpression";
+  operator: "++" | "--";
+  prefix: boolean;
+  name: string;
+}
+
+/** x += val, x -= val, etc. — compound assignment */
+export type CompoundAssignmentOperator = "+=" | "-=" | "*=" | "/=" | "%=";
+
+export interface CompoundAssignmentExpression {
+  type: "CompoundAssignmentExpression";
+  operator: CompoundAssignmentOperator;
+  name: string;
+  value: Expression;
+}
+
+/** arr[i] — reads an array element */
+export interface ArrayAccessExpression {
+  type: "ArrayAccessExpression";
+  array: string;
+  index: Expression;
+}
+
+/** arr[i] = val — writes an array element */
+export interface ArrayIndexAssignment {
+  type: "ArrayIndexAssignment";
+  array: string;
+  index: Expression;
+  value: Expression;
+}
+
 export type Expression =
   | IntegerLiteral
   | StringLiteral
@@ -133,7 +206,13 @@ export type Expression =
   | CallExpression
   | AddressOfExpression
   | DereferenceExpression
-  | DereferenceAssignment;
+  | DereferenceAssignment
+  | LogicalExpression
+  | TernaryExpression
+  | UpdateExpression
+  | CompoundAssignmentExpression
+  | ArrayAccessExpression
+  | ArrayIndexAssignment;
 
 export interface ReturnStatement {
   type: "ReturnStatement";
@@ -173,9 +252,18 @@ export interface ForStatement {
   body: Statement[];
 }
 
+export interface ArrayDeclaration {
+  type: "ArrayDeclaration";
+  name: string;
+  typeSpec: TypeSpecifier;
+  size: number;
+  initializer?: Expression[];
+}
+
 export type Statement =
   | ReturnStatement
   | VariableDeclaration
+  | ArrayDeclaration
   | ExpressionStatement
   | IfStatement
   | WhileStatement
@@ -202,7 +290,14 @@ export interface ExternFunctionDeclaration {
   params: Parameter[];
 }
 
-export type Declaration = FunctionDeclaration | ExternFunctionDeclaration;
+export interface GlobalVariableDeclaration {
+  type: "GlobalVariableDeclaration";
+  name: string;
+  typeSpec: TypeSpecifier;
+  initializer: Expression;
+}
+
+export type Declaration = FunctionDeclaration | ExternFunctionDeclaration | GlobalVariableDeclaration;
 
 export interface Program {
   type: "Program";

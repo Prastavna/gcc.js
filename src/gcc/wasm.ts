@@ -56,6 +56,7 @@ export const Section = {
   IMPORT: 0x02,
   FUNCTION: 0x03,
   MEMORY: 0x05,
+  GLOBAL: 0x06,
   EXPORT: 0x07,
   CODE: 0x0a,
   DATA: 0x0b,
@@ -82,9 +83,16 @@ export const Op = {
   RETURN: 0x0f,
   CALL: 0x10,
 
+  // Parametric
+  DROP: 0x1a,
+  SELECT: 0x1b,
+
   // Variables
   LOCAL_GET: 0x20,
   LOCAL_SET: 0x21,
+  LOCAL_TEE: 0x22,
+  GLOBAL_GET: 0x23,
+  GLOBAL_SET: 0x24,
 
   // Constants
   I32_CONST: 0x41,

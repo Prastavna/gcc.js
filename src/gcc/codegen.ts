@@ -1,4 +1,4 @@
-import type { Program, FunctionDeclaration, ExternFunctionDeclaration, Statement, Expression } from "./types.ts";
+import type { Program, FunctionDeclaration, ExternFunctionDeclaration, GlobalVariableDeclaration, Statement, Expression } from "./types.ts";
 import {
   WASM_MAGIC,
   WASM_VERSION,
@@ -8,6 +8,7 @@ import {
   ExportKind,
   FUNC_TYPE_TAG,
   BLOCK_VOID,
+  BLOCK_I32,
   encodeUnsignedLEB128,
   encodeSignedLEB128,
   encodeName,
@@ -28,16 +29,23 @@ export function generate(ast: Program): Uint8Array {
   nextMemAddr = 0;
   stringData = [];
 
-  // Separate extern declarations from local function definitions
+  // Separate declarations by kind
   const externs: ExternFunctionDeclaration[] = [];
   const funcs: FunctionDeclaration[] = [];
+  const globals: GlobalVariableDeclaration[] = [];
   for (const d of ast.declarations) {
     if (d.type === "ExternFunctionDeclaration") externs.push(d);
     else if (d.type === "FunctionDeclaration") funcs.push(d);
+    else if (d.type === "GlobalVariableDeclaration") globals.push(d);
+  }
+
+  // Build global variable name -> WASM global index map
+  const globalIndex = new Map<string, number>();
+  for (let i = 0; i < globals.length; i++) {
+    globalIndex.set(globals[i].name, i);
   }
 
   // String data starts at address 1024 (leave 0-1023 for stack variables)
-  // We'll adjust nextMemAddr after processing all functions
   const stringBaseAddr = 1024;
   let stringOffset = stringBaseAddr;
 
@@ -99,13 +107,14 @@ export function generate(ast: Program): Uint8Array {
     if (functionUsesMemory(func)) { memoryUsed = true; break; }
   }
 
-  // Build sections
+  // Build sections (must follow WASM section ordering: 1,2,3,5,6,7,10,11)
   const typeSection = buildTypeSection(typeSigs);
   const importSection = externs.length > 0 ? buildImportSection(externs, importTypeIndices) : [];
   const funcSection = buildFunctionSection(funcTypeIndices);
   const memorySection = memoryUsed ? buildMemorySection() : [];
+  const globalSection = globals.length > 0 ? buildGlobalSection(globals) : [];
   const exportSection = buildExportSection(funcs, importCount);
-  const codeSection = buildCodeSection(funcs, funcIndex, stringMap);
+  const codeSection = buildCodeSection(funcs, funcIndex, stringMap, globalIndex);
   const dataSection = stringData.length > 0 ? buildDataSection() : [];
 
   const bytes: number[] = [
@@ -115,6 +124,7 @@ export function generate(ast: Program): Uint8Array {
     ...importSection,
     ...funcSection,
     ...memorySection,
+    ...globalSection,
     ...exportSection,
     ...codeSection,
     ...dataSection,
@@ -129,6 +139,8 @@ function collectStringsFromProgram(ast: Program, cb: (s: string) => void): void 
   for (const d of ast.declarations) {
     if (d.type === "FunctionDeclaration") {
       collectStringsFromStatements(d.body, cb);
+    } else if (d.type === "GlobalVariableDeclaration") {
+      collectStringsFromExpr(d.initializer, cb);
     }
   }
 }
@@ -141,6 +153,9 @@ function collectStringsFromStatement(stmt: Statement, cb: (s: string) => void): 
   switch (stmt.type) {
     case "ReturnStatement": collectStringsFromExpr(stmt.expression, cb); break;
     case "VariableDeclaration": collectStringsFromExpr(stmt.initializer, cb); break;
+    case "ArrayDeclaration":
+      if (stmt.initializer) stmt.initializer.forEach(e => collectStringsFromExpr(e, cb));
+      break;
     case "ExpressionStatement": collectStringsFromExpr(stmt.expression, cb); break;
     case "IfStatement":
       collectStringsFromExpr(stmt.condition, cb);
@@ -168,7 +183,12 @@ function collectStringsFromExpr(expr: Expression, cb: (s: string) => void): void
     case "DereferenceExpression": collectStringsFromExpr(expr.operand, cb); break;
     case "DereferenceAssignment": collectStringsFromExpr(expr.pointer, cb); collectStringsFromExpr(expr.value, cb); break;
     case "AssignmentExpression": collectStringsFromExpr(expr.value, cb); break;
+    case "CompoundAssignmentExpression": collectStringsFromExpr(expr.value, cb); break;
     case "CallExpression": expr.args.forEach((a) => collectStringsFromExpr(a, cb)); break;
+    case "LogicalExpression": collectStringsFromExpr(expr.left, cb); collectStringsFromExpr(expr.right, cb); break;
+    case "TernaryExpression": collectStringsFromExpr(expr.condition, cb); collectStringsFromExpr(expr.consequent, cb); collectStringsFromExpr(expr.alternate, cb); break;
+    case "ArrayAccessExpression": collectStringsFromExpr(expr.index, cb); break;
+    case "ArrayIndexAssignment": collectStringsFromExpr(expr.index, cb); collectStringsFromExpr(expr.value, cb); break;
     default: break;
   }
 }
@@ -188,6 +208,7 @@ function stmtUsesMemory(stmt: Statement): boolean {
   switch (stmt.type) {
     case "ReturnStatement": return exprUsesMemory(stmt.expression);
     case "VariableDeclaration": return exprUsesMemory(stmt.initializer);
+    case "ArrayDeclaration": return true;
     case "ExpressionStatement": return exprUsesMemory(stmt.expression);
     case "IfStatement":
       return exprUsesMemory(stmt.condition) || statementsUseMemory(stmt.consequent) ||
@@ -201,11 +222,15 @@ function stmtUsesMemory(stmt: Statement): boolean {
 
 function exprUsesMemory(expr: Expression): boolean {
   switch (expr.type) {
-    case "AddressOfExpression": case "DereferenceExpression": case "DereferenceAssignment": case "StringLiteral": return true;
+    case "AddressOfExpression": case "DereferenceExpression": case "DereferenceAssignment": case "StringLiteral":
+    case "ArrayAccessExpression": case "ArrayIndexAssignment": return true;
     case "BinaryExpression": return exprUsesMemory(expr.left) || exprUsesMemory(expr.right);
     case "UnaryExpression": return exprUsesMemory(expr.operand);
     case "AssignmentExpression": return exprUsesMemory(expr.value);
+    case "CompoundAssignmentExpression": return exprUsesMemory(expr.value);
     case "CallExpression": return expr.args.some(exprUsesMemory);
+    case "LogicalExpression": return exprUsesMemory(expr.left) || exprUsesMemory(expr.right);
+    case "TernaryExpression": return exprUsesMemory(expr.condition) || exprUsesMemory(expr.consequent) || exprUsesMemory(expr.alternate);
     default: return false;
   }
 }
@@ -251,6 +276,63 @@ function buildMemorySection(): number[] {
   return makeSection(Section.MEMORY, content);
 }
 
+/**
+ * Evaluates a constant expression at compile time.
+ * WASM global init_expr only supports constant values (i32.const).
+ * Returns the evaluated integer, or null if not a constant expression.
+ */
+function evalConstExpr(expr: Expression): number | null {
+  switch (expr.type) {
+    case "IntegerLiteral":
+      return expr.value;
+    case "UnaryExpression":
+      if (expr.operator === "-") {
+        const v = evalConstExpr(expr.operand);
+        return v !== null ? -v : null;
+      }
+      if (expr.operator === "!") {
+        const v = evalConstExpr(expr.operand);
+        return v !== null ? (v === 0 ? 1 : 0) : null;
+      }
+      return null;
+    case "BinaryExpression": {
+      const l = evalConstExpr(expr.left);
+      const r = evalConstExpr(expr.right);
+      if (l === null || r === null) return null;
+      switch (expr.operator) {
+        case "+": return (l + r) | 0;
+        case "-": return (l - r) | 0;
+        case "*": return Math.imul(l, r);
+        case "/": return r === 0 ? null : (l / r) | 0;
+        case "%": return r === 0 ? null : (l % r) | 0;
+        case "==": return l === r ? 1 : 0;
+        case "!=": return l !== r ? 1 : 0;
+        case "<": return l < r ? 1 : 0;
+        case ">": return l > r ? 1 : 0;
+        case "<=": return l <= r ? 1 : 0;
+        case ">=": return l >= r ? 1 : 0;
+        default: return null;
+      }
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Global section: declares mutable i32 globals with constant initializers.
+ * Evaluates constant expressions at compile time for the WASM init_expr.
+ */
+function buildGlobalSection(globals: GlobalVariableDeclaration[]): number[] {
+  const content: number[] = [...encodeUnsignedLEB128(globals.length)];
+  for (const g of globals) {
+    content.push(ValType.I32, 0x01); // mutable i32
+    const val = evalConstExpr(g.initializer);
+    content.push(Op.I32_CONST, ...encodeSignedLEB128(val ?? 0), Op.END);
+  }
+  return makeSection(Section.GLOBAL, content);
+}
+
 function buildExportSection(funcs: FunctionDeclaration[], importCount: number): number[] {
   const entries: number[] = [];
   let exportCount = funcs.length;
@@ -273,10 +355,11 @@ function buildCodeSection(
   funcs: FunctionDeclaration[],
   funcIndex: Map<string, number>,
   stringMap: Map<string, number>,
+  globalIndex: Map<string, number>,
 ): number[] {
   const bodies: number[] = [];
   for (const func of funcs) {
-    bodies.push(...buildFunctionBody(func, funcIndex, stringMap));
+    bodies.push(...buildFunctionBody(func, funcIndex, stringMap, globalIndex));
   }
   const content = [...encodeUnsignedLEB128(funcs.length), ...bodies];
   return makeSection(Section.CODE, content);
@@ -312,6 +395,9 @@ function findATInStatement(stmt: Statement, taken: Set<string>): void {
   switch (stmt.type) {
     case "ReturnStatement": findATInExpr(stmt.expression, taken); break;
     case "VariableDeclaration": findATInExpr(stmt.initializer, taken); break;
+    case "ArrayDeclaration":
+      if (stmt.initializer) stmt.initializer.forEach(e => findATInExpr(e, taken));
+      break;
     case "ExpressionStatement": findATInExpr(stmt.expression, taken); break;
     case "IfStatement":
       findATInExpr(stmt.condition, taken);
@@ -339,7 +425,12 @@ function findATInExpr(expr: Expression, taken: Set<string>): void {
     case "DereferenceExpression": findATInExpr(expr.operand, taken); break;
     case "DereferenceAssignment": findATInExpr(expr.pointer, taken); findATInExpr(expr.value, taken); break;
     case "AssignmentExpression": findATInExpr(expr.value, taken); break;
+    case "CompoundAssignmentExpression": findATInExpr(expr.value, taken); break;
     case "CallExpression": expr.args.forEach((a) => findATInExpr(a, taken)); break;
+    case "LogicalExpression": findATInExpr(expr.left, taken); findATInExpr(expr.right, taken); break;
+    case "TernaryExpression": findATInExpr(expr.condition, taken); findATInExpr(expr.consequent, taken); findATInExpr(expr.alternate, taken); break;
+    case "ArrayAccessExpression": findATInExpr(expr.index, taken); break;
+    case "ArrayIndexAssignment": findATInExpr(expr.index, taken); findATInExpr(expr.value, taken); break;
     default: break;
   }
 }
@@ -349,8 +440,10 @@ function findATInExpr(expr: Expression, taken: Set<string>): void {
 type Ctx = {
   locals: Map<string, number>;
   memVars: Map<string, number>;
+  arrayVars: Map<string, { addr: number; size: number }>;
   funcIndex: Map<string, number>;
   stringMap: Map<string, number>;
+  globalIndex: Map<string, number>;
 };
 
 function collectLocalsFromStatements(
@@ -389,6 +482,7 @@ function buildFunctionBody(
   func: FunctionDeclaration,
   funcIndex: Map<string, number>,
   stringMap: Map<string, number>,
+  globalIndex: Map<string, number>,
 ): number[] {
   const addressTaken = findAddressTakenVars(func);
   const locals = new Map<string, number>();
@@ -415,7 +509,23 @@ function buildFunctionBody(
     }
   }
 
-  const ctx: Ctx = { locals, memVars, funcIndex, stringMap };
+  // Allocate arrays in linear memory
+  const arrayVars = new Map<string, { addr: number; size: number }>();
+  function collectArrayDecls(stmts: Statement[]): void {
+    for (const s of stmts) {
+      if (s.type === "ArrayDeclaration" && !arrayVars.has(s.name)) {
+        const addr = nextMemAddr;
+        nextMemAddr += s.size * 4;
+        arrayVars.set(s.name, { addr, size: s.size });
+      }
+      if (s.type === "IfStatement") { collectArrayDecls(s.consequent); if (s.alternate) collectArrayDecls(s.alternate); }
+      if (s.type === "WhileStatement") collectArrayDecls(s.body);
+      if (s.type === "ForStatement") { collectArrayDecls([s.init]); collectArrayDecls(s.body); }
+    }
+  }
+  collectArrayDecls(func.body);
+
+  const ctx: Ctx = { locals, memVars, arrayVars, funcIndex, stringMap, globalIndex };
   const instructions: number[] = [];
 
   for (const ap of atParamCopies) {
@@ -462,8 +572,23 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
         out.push(Op.LOCAL_SET, ...encodeUnsignedLEB128(idx));
       }
       break;
+    case "ArrayDeclaration":
+      if (stmt.initializer) {
+        const arrInfo = ctx.arrayVars.get(stmt.name)!;
+        for (let i = 0; i < stmt.initializer.length; i++) {
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr + i * 4));
+          emitExpression(out, stmt.initializer[i], ctx);
+          out.push(Op.I32_STORE, 0x02, 0x00);
+        }
+      }
+      break;
     case "ExpressionStatement":
       emitExpression(out, stmt.expression, ctx);
+      // Drop any value left on the stack by expressions used as statements.
+      // Assignments and stores don't produce values; everything else does.
+      if (exprProducesValue(stmt.expression)) {
+        out.push(Op.DROP);
+      }
       break;
     case "IfStatement":
       emitExpression(out, stmt.condition, ctx);
@@ -486,8 +611,28 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       out.push(Op.I32_EQZ, Op.BR_IF, ...encodeUnsignedLEB128(1));
       for (const s of stmt.body) emitStatement(out, s, ctx);
       emitExpression(out, stmt.update, ctx);
+      // Drop update expression value if it leaves one on the stack (e.g. i++)
+      if (exprProducesValue(stmt.update)) out.push(Op.DROP);
       out.push(Op.BR, ...encodeUnsignedLEB128(0), Op.END, Op.END);
       break;
+  }
+}
+
+// ── Expression value tracking ────────────────────────────
+
+/**
+ * Returns true if the expression pushes a value onto the WASM stack.
+ * Assignment/store expressions don't produce a value; all others do.
+ */
+function exprProducesValue(expr: Expression): boolean {
+  switch (expr.type) {
+    case "AssignmentExpression":
+    case "CompoundAssignmentExpression":
+    case "DereferenceAssignment":
+    case "ArrayIndexAssignment":
+      return false;
+    default:
+      return true;
   }
 }
 
@@ -497,6 +642,36 @@ const BINOP_MAP: Record<string, number> = {
   "+": Op.I32_ADD, "-": Op.I32_SUB, "*": Op.I32_MUL, "/": Op.I32_DIV_S, "%": Op.I32_REM_S,
   "==": Op.I32_EQ, "!=": Op.I32_NE, "<": Op.I32_LT_S, ">": Op.I32_GT_S, "<=": Op.I32_LE_S, ">=": Op.I32_GE_S,
 };
+
+/** Map compound assignment operator to its underlying binary WASM opcode */
+const COMPOUND_OP_MAP: Record<string, number> = {
+  "+=": Op.I32_ADD, "-=": Op.I32_SUB, "*=": Op.I32_MUL, "/=": Op.I32_DIV_S, "%=": Op.I32_REM_S,
+};
+
+function emitVarGet(out: number[], name: string, ctx: Ctx): void {
+  if (ctx.memVars.has(name)) {
+    out.push(Op.I32_CONST, ...encodeSignedLEB128(ctx.memVars.get(name)!));
+    out.push(Op.I32_LOAD, 0x02, 0x00);
+  } else if (ctx.locals.has(name)) {
+    out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(ctx.locals.get(name)!));
+  } else if (ctx.globalIndex.has(name)) {
+    out.push(Op.GLOBAL_GET, ...encodeUnsignedLEB128(ctx.globalIndex.get(name)!));
+  } else {
+    throw new Error(`Unknown variable '${name}'`);
+  }
+}
+
+function emitVarSet(out: number[], name: string, ctx: Ctx): void {
+  if (ctx.memVars.has(name)) {
+    out.push(Op.I32_STORE, 0x02, 0x00);
+  } else if (ctx.locals.has(name)) {
+    out.push(Op.LOCAL_SET, ...encodeUnsignedLEB128(ctx.locals.get(name)!));
+  } else if (ctx.globalIndex.has(name)) {
+    out.push(Op.GLOBAL_SET, ...encodeUnsignedLEB128(ctx.globalIndex.get(name)!));
+  } else {
+    throw new Error(`Unknown variable '${name}'`);
+  }
+}
 
 function emitExpression(out: number[], expr: Expression, ctx: Ctx): void {
   switch (expr.type) {
@@ -519,16 +694,18 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): void {
         out.push(Op.I32_CONST, ...encodeSignedLEB128(0));
         emitExpression(out, expr.operand, ctx);
         out.push(Op.I32_SUB);
+      } else if (expr.operator === "!") {
+        emitExpression(out, expr.operand, ctx);
+        out.push(Op.I32_EQZ);
       }
       break;
     case "Identifier":
-      if (ctx.memVars.has(expr.name)) {
-        out.push(Op.I32_CONST, ...encodeSignedLEB128(ctx.memVars.get(expr.name)!));
-        out.push(Op.I32_LOAD, 0x02, 0x00);
+      // Array name decays to pointer (base address)
+      if (ctx.arrayVars.has(expr.name)) {
+        const arrInfo = ctx.arrayVars.get(expr.name)!;
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr));
       } else {
-        const idx = ctx.locals.get(expr.name);
-        if (idx === undefined) throw new Error(`Unknown variable '${expr.name}'`);
-        out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(idx));
+        emitVarGet(out, expr.name, ctx);
       }
       break;
     case "AssignmentExpression":
@@ -537,12 +714,29 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): void {
         emitExpression(out, expr.value, ctx);
         out.push(Op.I32_STORE, 0x02, 0x00);
       } else {
-        const idx = ctx.locals.get(expr.name);
-        if (idx === undefined) throw new Error(`Unknown variable '${expr.name}'`);
         emitExpression(out, expr.value, ctx);
-        out.push(Op.LOCAL_SET, ...encodeUnsignedLEB128(idx));
+        emitVarSet(out, expr.name, ctx);
       }
       break;
+    case "CompoundAssignmentExpression": {
+      // x += val  =>  x = x + val
+      // For memory-backed vars we need: addr, (load old), val, binop, store
+      if (ctx.memVars.has(expr.name)) {
+        const addr = ctx.memVars.get(expr.name)!;
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(addr)); // addr for store
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(addr)); // addr for load
+        out.push(Op.I32_LOAD, 0x02, 0x00);                   // old value
+        emitExpression(out, expr.value, ctx);                  // rhs
+        out.push(COMPOUND_OP_MAP[expr.operator]);              // binop
+        out.push(Op.I32_STORE, 0x02, 0x00);                   // store result
+      } else {
+        emitVarGet(out, expr.name, ctx);
+        emitExpression(out, expr.value, ctx);
+        out.push(COMPOUND_OP_MAP[expr.operator]);
+        emitVarSet(out, expr.name, ctx);
+      }
+      break;
+    }
     case "CallExpression": {
       const fIdx = ctx.funcIndex.get(expr.callee);
       if (fIdx === undefined) throw new Error(`Unknown function '${expr.callee}'`);
@@ -565,5 +759,133 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): void {
       emitExpression(out, expr.value, ctx);
       out.push(Op.I32_STORE, 0x02, 0x00);
       break;
+    case "LogicalExpression":
+      if (expr.operator === "&&") {
+        // Short-circuit AND: if left is 0, result is 0; else evaluate right
+        // WASM: eval left; if (i32) { eval right; i32.eqz; i32.eqz } else { i32.const 0 } end
+        emitExpression(out, expr.left, ctx);
+        out.push(Op.IF, BLOCK_I32);
+        emitExpression(out, expr.right, ctx);
+        // Normalize to 0 or 1: double i32.eqz
+        out.push(Op.I32_EQZ, Op.I32_EQZ);
+        out.push(Op.ELSE);
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(0));
+        out.push(Op.END);
+      } else {
+        // Short-circuit OR: if left is nonzero, result is 1; else evaluate right
+        emitExpression(out, expr.left, ctx);
+        out.push(Op.IF, BLOCK_I32);
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
+        out.push(Op.ELSE);
+        emitExpression(out, expr.right, ctx);
+        out.push(Op.I32_EQZ, Op.I32_EQZ);
+        out.push(Op.END);
+      }
+      break;
+    case "TernaryExpression":
+      // condition ? consequent : alternate
+      emitExpression(out, expr.condition, ctx);
+      out.push(Op.IF, BLOCK_I32);
+      emitExpression(out, expr.consequent, ctx);
+      out.push(Op.ELSE);
+      emitExpression(out, expr.alternate, ctx);
+      out.push(Op.END);
+      break;
+    case "ArrayAccessExpression": {
+      // base_addr + index * 4, then load
+      const arrInfo = ctx.arrayVars.get(expr.array);
+      if (arrInfo) {
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr));
+      } else {
+        // Could be a pointer parameter used as array
+        emitVarGet(out, expr.array, ctx);
+      }
+      emitExpression(out, expr.index, ctx);
+      out.push(Op.I32_CONST, ...encodeSignedLEB128(4));
+      out.push(Op.I32_MUL);
+      out.push(Op.I32_ADD);
+      out.push(Op.I32_LOAD, 0x02, 0x00);
+      break;
+    }
+    case "ArrayIndexAssignment": {
+      // base_addr + index * 4, value, then store
+      const arrInfo = ctx.arrayVars.get(expr.array);
+      if (arrInfo) {
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr));
+      } else {
+        emitVarGet(out, expr.array, ctx);
+      }
+      emitExpression(out, expr.index, ctx);
+      out.push(Op.I32_CONST, ...encodeSignedLEB128(4));
+      out.push(Op.I32_MUL);
+      out.push(Op.I32_ADD);
+      emitExpression(out, expr.value, ctx);
+      out.push(Op.I32_STORE, 0x02, 0x00);
+      break;
+    }
+    case "UpdateExpression": {
+      // ++x (prefix): increment then return new value
+      // x++ (postfix): return old value then increment
+      const varName = expr.name;
+      const delta = expr.operator === "++" ? Op.I32_ADD : Op.I32_SUB;
+
+      if (ctx.memVars.has(varName)) {
+        const addr = ctx.memVars.get(varName)!;
+        if (expr.prefix) {
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(addr)); // addr for store
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(addr));
+          out.push(Op.I32_LOAD, 0x02, 0x00);
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
+          out.push(delta);
+          out.push(Op.I32_STORE, 0x02, 0x00);
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(addr));
+          out.push(Op.I32_LOAD, 0x02, 0x00);
+        } else {
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(addr));
+          out.push(Op.I32_LOAD, 0x02, 0x00);
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(addr));
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(addr));
+          out.push(Op.I32_LOAD, 0x02, 0x00);
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
+          out.push(delta);
+          out.push(Op.I32_STORE, 0x02, 0x00);
+        }
+      } else if (ctx.locals.has(varName)) {
+        const idx = ctx.locals.get(varName)!;
+        if (expr.prefix) {
+          out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(idx));
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
+          out.push(delta);
+          out.push(Op.LOCAL_TEE, ...encodeUnsignedLEB128(idx));
+        } else {
+          out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(idx));
+          out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(idx));
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
+          out.push(delta);
+          out.push(Op.LOCAL_SET, ...encodeUnsignedLEB128(idx));
+        }
+      } else if (ctx.globalIndex.has(varName)) {
+        const gIdx = ctx.globalIndex.get(varName)!;
+        if (expr.prefix) {
+          // new = old + 1; global.set; push new value
+          emitVarGet(out, varName, ctx);
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
+          out.push(delta);
+          // WASM has no global.tee, so store then load
+          out.push(Op.GLOBAL_SET, ...encodeUnsignedLEB128(gIdx));
+          out.push(Op.GLOBAL_GET, ...encodeUnsignedLEB128(gIdx));
+        } else {
+          // get old (result), compute new, global.set
+          out.push(Op.GLOBAL_GET, ...encodeUnsignedLEB128(gIdx));
+          out.push(Op.GLOBAL_GET, ...encodeUnsignedLEB128(gIdx));
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
+          out.push(delta);
+          out.push(Op.GLOBAL_SET, ...encodeUnsignedLEB128(gIdx));
+        }
+      } else {
+        throw new Error(`Unknown variable '${varName}'`);
+      }
+      break;
+    }
   }
 }

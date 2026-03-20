@@ -9,33 +9,49 @@ import type {
   TypeSpecifier,
   BinaryOperator,
   ComparisonOperator,
+  LogicalOperator,
+  CompoundAssignmentOperator,
 } from "./types.ts";
 
 /**
  * Recursive descent parser with precedence climbing for expressions.
  *
- * Grammar (Milestone 5):
- *   program        → function_decl*
+ * Grammar (Phase 2 — Milestone 8):
+ *   program        → declaration*
+ *   declaration    → extern_decl | function_decl
+ *   extern_decl    → type_spec IDENTIFIER '(' param_list? ')' ';'
  *   function_decl  → type_spec IDENTIFIER '(' param_list? ')' '{' statement* '}'
  *   param_list     → param (',' param)*
- *   param          → type_spec IDENTIFIER
+ *   param          → type_spec '*'? IDENTIFIER
  *   type_spec      → 'int' | 'void'
+ *
  *   statement      → var_decl | return_stmt | if_stmt | while_stmt | for_stmt
- *                   | block | expr_stmt
- *   var_decl       → type_spec IDENTIFIER '=' expression ';'
+ *                  | block | expr_stmt
+ *   var_decl       → type_spec '*'? IDENTIFIER '=' expression ';'
  *   return_stmt    → 'return' expression ';'
  *   if_stmt        → 'if' '(' expression ')' block_or_stmt ('else' block_or_stmt)?
  *   while_stmt     → 'while' '(' expression ')' block_or_stmt
  *   for_stmt       → 'for' '(' (var_decl | expr_stmt) expression ';' expression ')' block_or_stmt
  *   block_or_stmt  → '{' statement* '}' | statement
  *   expr_stmt      → expression ';'
+ *
  *   expression     → assignment
- *   assignment     → IDENTIFIER '=' assignment | comparison
+ *   assignment     → '*' unary '=' assignment
+ *                  | IDENTIFIER '=' assignment
+ *                  | IDENTIFIER compound_op assignment
+ *                  | ternary
+ *   compound_op    → '+=' | '-=' | '*=' | '/=' | '%='
+ *   ternary        → logical_or ('?' expression ':' ternary)?
+ *   logical_or     → logical_and ('||' logical_and)*
+ *   logical_and    → comparison ('&&' comparison)*
  *   comparison     → additive (('==' | '!=' | '<' | '>' | '<=' | '>=') additive)*
  *   additive       → multiplicative (('+' | '-') multiplicative)*
  *   multiplicative → unary (('*' | '/' | '%') unary)*
- *   unary          → '-' unary | primary
- *   primary        → NUMBER | IDENTIFIER '(' arg_list? ')' | IDENTIFIER | '(' expression ')'
+ *   unary          → '-' unary | '!' unary | '*' unary | '&' IDENTIFIER
+ *                  | '++' IDENTIFIER | '--' IDENTIFIER | postfix
+ *   postfix        → primary ('++'  | '--')*
+ *   primary        → NUMBER | STRING | IDENTIFIER '(' arg_list? ')' | IDENTIFIER
+ *                  | '(' expression ')'
  *   arg_list       → expression (',' expression)*
  */
 export function parse(tokens: Token[]): Program {
@@ -86,6 +102,13 @@ export function parse(tokens: Token[]): Program {
     return parseAssignment();
   }
 
+  function isCompoundAssignOp(): boolean {
+    const t = current().type;
+    return t === TokenType.PLUS_EQUALS || t === TokenType.MINUS_EQUALS ||
+      t === TokenType.STAR_EQUALS || t === TokenType.SLASH_EQUALS ||
+      t === TokenType.PERCENT_EQUALS;
+  }
+
   function parseAssignment(): Expression {
     // *expr = val (dereference assignment)
     if (current().type === TokenType.STAR) {
@@ -101,17 +124,85 @@ export function parse(tokens: Token[]): Program {
       pos = savedPos;
     }
 
-    // ident = val
-    if (
-      current().type === TokenType.IDENTIFIER &&
-      peek(1).type === TokenType.EQUALS
-    ) {
-      const name = current().value;
-      pos += 2;
-      const value = parseAssignment();
-      return { type: "AssignmentExpression", name, value };
+    // ident[expr] = val (array index assignment)  OR  ident = val  OR  ident += val
+    if (current().type === TokenType.IDENTIFIER) {
+      const nextTok = peek(1);
+
+      // Array index assignment: ident[expr] = val
+      if (nextTok.type === TokenType.LBRACKET) {
+        const savedPos = pos;
+        const name = current().value;
+        pos += 2; // skip ident and [
+        const index = parseExpression();
+        expect(TokenType.RBRACKET, "']' after array index");
+        if (current().type === TokenType.EQUALS) {
+          pos++; // skip =
+          const value = parseAssignment();
+          return { type: "ArrayIndexAssignment", array: name, index, value };
+        }
+        // Not an assignment — backtrack and let normal expression parsing handle it
+        pos = savedPos;
+      }
+
+      if (nextTok.type === TokenType.EQUALS) {
+        const name = current().value;
+        pos += 2;
+        const value = parseAssignment();
+        return { type: "AssignmentExpression", name, value };
+      }
+      // Compound assignment: ident += val, ident -= val, etc.
+      if (
+        nextTok.type === TokenType.PLUS_EQUALS ||
+        nextTok.type === TokenType.MINUS_EQUALS ||
+        nextTok.type === TokenType.STAR_EQUALS ||
+        nextTok.type === TokenType.SLASH_EQUALS ||
+        nextTok.type === TokenType.PERCENT_EQUALS
+      ) {
+        const name = current().value;
+        const op = nextTok.value as CompoundAssignmentOperator;
+        pos += 2;
+        const value = parseAssignment();
+        return { type: "CompoundAssignmentExpression", operator: op, name, value };
+      }
     }
-    return parseComparison();
+    return parseTernary();
+  }
+
+  /** ternary → logical_or ('?' expression ':' ternary)? */
+  function parseTernary(): Expression {
+    let expr = parseLogicalOr();
+    if (current().type === TokenType.QUESTION) {
+      pos++; // skip ?
+      const consequent = parseExpression();
+      expect(TokenType.COLON, "':' in ternary expression");
+      const alternate = parseTernary();
+      expr = { type: "TernaryExpression", condition: expr, consequent, alternate };
+    }
+    return expr;
+  }
+
+  /** logical_or → logical_and ('||' logical_and)* */
+  function parseLogicalOr(): Expression {
+    let left = parseLogicalAnd();
+    while (current().type === TokenType.PIPE_PIPE) {
+      const op = current().value as LogicalOperator;
+      pos++;
+      const right = parseLogicalAnd();
+      left = { type: "LogicalExpression", operator: op, left, right };
+    }
+    return left;
+  }
+
+  /** logical_and → comparison ('&&' comparison)* */
+  function parseLogicalAnd(): Expression {
+    let left = parseComparison();
+    while (current().type === TokenType.AND_AND) {
+      const op = current().value as LogicalOperator;
+      pos++;
+      const right = parseComparison();
+      left = { type: "LogicalExpression", operator: op, left, right };
+    }
+    return left;
   }
 
   /** comparison → additive (('==' | '!=' | '<' | '>' | '<=' | '>=') additive)* */
@@ -156,10 +247,17 @@ export function parse(tokens: Token[]): Program {
   }
 
   function parseUnary(): Expression {
+    // Unary minus: -expr
     if (current().type === TokenType.MINUS) {
       pos++;
       const operand = parseUnary();
       return { type: "UnaryExpression", operator: "-", operand };
+    }
+    // Logical NOT: !expr
+    if (current().type === TokenType.BANG) {
+      pos++;
+      const operand = parseUnary();
+      return { type: "UnaryExpression", operator: "!", operand };
     }
     // *expr (dereference)
     if (current().type === TokenType.STAR) {
@@ -173,7 +271,39 @@ export function parse(tokens: Token[]): Program {
       const name = expect(TokenType.IDENTIFIER, "variable name after '&'").value;
       return { type: "AddressOfExpression", name };
     }
-    return parsePrimary();
+    // Prefix ++ident
+    if (current().type === TokenType.PLUS_PLUS) {
+      pos++;
+      const name = expect(TokenType.IDENTIFIER, "variable name after '++'").value;
+      return { type: "UpdateExpression", operator: "++", prefix: true, name };
+    }
+    // Prefix --ident
+    if (current().type === TokenType.MINUS_MINUS) {
+      pos++;
+      const name = expect(TokenType.IDENTIFIER, "variable name after '--'").value;
+      return { type: "UpdateExpression", operator: "--", prefix: true, name };
+    }
+    return parsePostfix();
+  }
+
+  /** postfix → primary ('++'  | '--')* */
+  function parsePostfix(): Expression {
+    let expr = parsePrimary();
+    while (
+      current().type === TokenType.PLUS_PLUS ||
+      current().type === TokenType.MINUS_MINUS
+    ) {
+      // Only identifiers can be postfix-incremented
+      if (expr.type !== "Identifier") {
+        throw new Error(
+          `Postfix ${current().value} requires a variable at line ${current().line}:${current().col}`
+        );
+      }
+      const op = current().value as "++" | "--";
+      pos++;
+      expr = { type: "UpdateExpression", operator: op, prefix: false, name: expr.name };
+    }
+    return expr;
   }
 
   function parsePrimary(): Expression {
@@ -192,6 +322,13 @@ export function parse(tokens: Token[]): Program {
     if (tok.type === TokenType.IDENTIFIER) {
       const name = tok.value;
       pos++;
+      // Array access: ident[expr]
+      if (current().type === TokenType.LBRACKET) {
+        pos++; // skip [
+        const index = parseExpression();
+        expect(TokenType.RBRACKET, "']' after array index");
+        return { type: "ArrayAccessExpression", array: name, index };
+      }
       if (current().type === TokenType.LPAREN) {
         pos++;
         const args: Expression[] = [];
@@ -251,6 +388,36 @@ export function parse(tokens: Token[]): Program {
       const initializer = parseExpression();
       expect(TokenType.SEMICOLON, "';' after variable declaration");
       return { type: "VariableDeclaration", name, typeSpec, initializer };
+    }
+
+    // Array declaration: int arr[5]; or int arr[3] = {1, 2, 3};
+    if (
+      isTypeSpec() &&
+      peek(1).type === TokenType.IDENTIFIER &&
+      peek(2).type === TokenType.LBRACKET
+    ) {
+      const typeSpec = parseTypeSpec();
+      const name = expect(TokenType.IDENTIFIER, "array name").value;
+      expect(TokenType.LBRACKET, "'['");
+      const sizeTok = expect(TokenType.NUMBER, "array size");
+      const size = parseInt(sizeTok.value, 10);
+      expect(TokenType.RBRACKET, "']'");
+      let initializer: Expression[] | undefined;
+      if (current().type === TokenType.EQUALS) {
+        pos++; // skip =
+        expect(TokenType.LBRACE, "'{' for array initializer");
+        initializer = [];
+        if (current().type !== TokenType.RBRACE) {
+          initializer.push(parseExpression());
+          while (current().type === TokenType.COMMA) {
+            pos++;
+            initializer.push(parseExpression());
+          }
+        }
+        expect(TokenType.RBRACE, "'}' after array initializer");
+      }
+      expect(TokenType.SEMICOLON, "';' after array declaration");
+      return { type: "ArrayDeclaration", name, typeSpec, size, initializer };
     }
 
     // Variable declaration: int x = expr;
@@ -360,17 +527,32 @@ export function parse(tokens: Token[]): Program {
     return params;
   }
 
-  function parseFunctionDecl(): Declaration {
-    const returnType = parseTypeSpec();
-    const name = expect(TokenType.IDENTIFIER, "function name").value;
-    expect(TokenType.LPAREN, "'('");
+  /** Parse a top-level declaration: function, extern, or global variable */
+  function parseTopLevelDecl(): Declaration {
+    const typeSpec = parseTypeSpec();
+
+    // Skip optional * for pointer types at top level
+    if (current().type === TokenType.STAR) pos++;
+
+    const name = expect(TokenType.IDENTIFIER, "declaration name").value;
+
+    // Global variable: type ident = expr;
+    if (current().type === TokenType.EQUALS) {
+      pos++; // skip =
+      const initializer = parseExpression();
+      expect(TokenType.SEMICOLON, "';' after global variable declaration");
+      return { type: "GlobalVariableDeclaration", name, typeSpec, initializer };
+    }
+
+    // Function or extern: type ident(...)
+    expect(TokenType.LPAREN, "'(' or '=' after declaration name");
     const params = parseParamList();
     expect(TokenType.RPAREN, "')'");
 
     // Extern function declaration: ends with ';' (no body)
     if (current().type === TokenType.SEMICOLON) {
       pos++;
-      return { type: "ExternFunctionDeclaration", name, returnType, params };
+      return { type: "ExternFunctionDeclaration", name, returnType: typeSpec, params };
     }
 
     expect(TokenType.LBRACE, "'{'");
@@ -379,13 +561,13 @@ export function parse(tokens: Token[]): Program {
       body.push(parseStatement());
     }
     expect(TokenType.RBRACE, "'}'");
-    return { type: "FunctionDeclaration", name, returnType, params, body };
+    return { type: "FunctionDeclaration", name, returnType: typeSpec, params, body };
   }
 
   function parseProgram(): Program {
     const declarations: Declaration[] = [];
     while (current().type !== TokenType.EOF) {
-      declarations.push(parseFunctionDecl());
+      declarations.push(parseTopLevelDecl());
     }
     return { type: "Program", declarations };
   }

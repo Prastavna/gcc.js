@@ -351,4 +351,182 @@ describe("parser", () => {
       expect(ast.declarations.length).toBe(0);
     });
   });
+
+  describe("logical operators (milestone 8)", () => {
+    it("parses && as LogicalExpression", () => {
+      const ast = parseSource("int main() { return a && b; }");
+      const ret = ast.declarations[0] as any;
+      const expr = ret.body[0].expression;
+      expect(expr.type).toBe("LogicalExpression");
+      expect(expr.operator).toBe("&&");
+      expect(expr.left.type).toBe("Identifier");
+      expect(expr.right.type).toBe("Identifier");
+    });
+
+    it("parses || as LogicalExpression", () => {
+      const ast = parseSource("int main() { return a || b; }");
+      const ret = ast.declarations[0] as any;
+      const expr = ret.body[0].expression;
+      expect(expr.type).toBe("LogicalExpression");
+      expect(expr.operator).toBe("||");
+    });
+
+    it("&& has higher precedence than ||", () => {
+      // a || b && c  should parse as  a || (b && c)
+      const ast = parseSource("int main() { return a || b && c; }");
+      const ret = ast.declarations[0] as any;
+      const expr = ret.body[0].expression;
+      expect(expr.type).toBe("LogicalExpression");
+      expect(expr.operator).toBe("||");
+      expect(expr.right.type).toBe("LogicalExpression");
+      expect(expr.right.operator).toBe("&&");
+    });
+
+    it("parses ! as unary operator", () => {
+      const ast = parseSource("int main() { return !x; }");
+      const ret = ast.declarations[0] as any;
+      const expr = ret.body[0].expression;
+      expect(expr.type).toBe("UnaryExpression");
+      expect(expr.operator).toBe("!");
+    });
+
+    it("double negation !!x", () => {
+      const ast = parseSource("int main() { return !!x; }");
+      const ret = ast.declarations[0] as any;
+      const expr = ret.body[0].expression;
+      expect(expr.type).toBe("UnaryExpression");
+      expect(expr.operator).toBe("!");
+      expect(expr.operand.type).toBe("UnaryExpression");
+      expect(expr.operand.operator).toBe("!");
+    });
+  });
+
+  describe("ternary operator (milestone 8)", () => {
+    it("parses a ? b : c as TernaryExpression", () => {
+      const ast = parseSource("int main() { return a ? 1 : 0; }");
+      const ret = ast.declarations[0] as any;
+      const expr = ret.body[0].expression;
+      expect(expr.type).toBe("TernaryExpression");
+      expect(expr.condition.type).toBe("Identifier");
+      expect(expr.consequent.type).toBe("IntegerLiteral");
+      expect(expr.alternate.type).toBe("IntegerLiteral");
+    });
+
+    it("nested ternary (right-associative)", () => {
+      // a ? b : c ? d : e  parses as  a ? b : (c ? d : e)
+      const ast = parseSource("int main() { return a ? 1 : b ? 2 : 3; }");
+      const ret = ast.declarations[0] as any;
+      const expr = ret.body[0].expression;
+      expect(expr.type).toBe("TernaryExpression");
+      expect(expr.alternate.type).toBe("TernaryExpression");
+    });
+  });
+
+  describe("increment/decrement (milestone 8)", () => {
+    it("parses prefix ++x", () => {
+      const ast = parseSource("int main() { return ++x; }");
+      const ret = ast.declarations[0] as any;
+      const expr = ret.body[0].expression;
+      expect(expr.type).toBe("UpdateExpression");
+      expect(expr.operator).toBe("++");
+      expect(expr.prefix).toBe(true);
+      expect(expr.name).toBe("x");
+    });
+
+    it("parses postfix x++", () => {
+      const ast = parseSource("int main() { return x++; }");
+      const ret = ast.declarations[0] as any;
+      const expr = ret.body[0].expression;
+      expect(expr.type).toBe("UpdateExpression");
+      expect(expr.operator).toBe("++");
+      expect(expr.prefix).toBe(false);
+      expect(expr.name).toBe("x");
+    });
+
+    it("parses prefix --x", () => {
+      const ast = parseSource("int main() { return --x; }");
+      const ret = ast.declarations[0] as any;
+      const expr = ret.body[0].expression;
+      expect(expr.type).toBe("UpdateExpression");
+      expect(expr.operator).toBe("--");
+      expect(expr.prefix).toBe(true);
+    });
+
+    it("parses postfix x--", () => {
+      const ast = parseSource("int main() { return x--; }");
+      const ret = ast.declarations[0] as any;
+      const expr = ret.body[0].expression;
+      expect(expr.type).toBe("UpdateExpression");
+      expect(expr.operator).toBe("--");
+      expect(expr.prefix).toBe(false);
+    });
+  });
+
+  describe("arrays (milestone 9)", () => {
+    it("parses array declaration", () => {
+      const ast = parseSource("int main() { int arr[5]; return 0; }");
+      const func = ast.declarations[0] as any;
+      expect(func.body[0].type).toBe("ArrayDeclaration");
+      expect(func.body[0].name).toBe("arr");
+      expect(func.body[0].size).toBe(5);
+      expect(func.body[0].initializer).toBeUndefined();
+    });
+
+    it("parses array declaration with initializer", () => {
+      const ast = parseSource("int main() { int arr[3] = {1, 2, 3}; return 0; }");
+      const func = ast.declarations[0] as any;
+      expect(func.body[0].type).toBe("ArrayDeclaration");
+      expect(func.body[0].size).toBe(3);
+      expect(func.body[0].initializer.length).toBe(3);
+      expect(func.body[0].initializer[0].type).toBe("IntegerLiteral");
+    });
+
+    it("parses array access expression", () => {
+      const ast = parseSource("int main() { return arr[0]; }");
+      const func = ast.declarations[0] as any;
+      const expr = func.body[0].expression;
+      expect(expr.type).toBe("ArrayAccessExpression");
+      expect(expr.array).toBe("arr");
+      expect(expr.index.type).toBe("IntegerLiteral");
+    });
+
+    it("parses array index assignment", () => {
+      const ast = parseSource("int main() { arr[0] = 10; return 0; }");
+      const func = ast.declarations[0] as any;
+      const expr = func.body[0].expression;
+      expect(expr.type).toBe("ArrayIndexAssignment");
+      expect(expr.array).toBe("arr");
+      expect(expr.index.type).toBe("IntegerLiteral");
+      expect(expr.value.type).toBe("IntegerLiteral");
+    });
+
+    it("parses array access with computed index", () => {
+      const ast = parseSource("int main() { return arr[i + 1]; }");
+      const func = ast.declarations[0] as any;
+      const expr = func.body[0].expression;
+      expect(expr.type).toBe("ArrayAccessExpression");
+      expect(expr.index.type).toBe("BinaryExpression");
+    });
+  });
+
+  describe("compound assignment (milestone 8)", () => {
+    it("parses x += 1", () => {
+      const ast = parseSource("int main() { x += 1; return 0; }");
+      const func = ast.declarations[0] as any;
+      const stmt = func.body[0];
+      expect(stmt.type).toBe("ExpressionStatement");
+      expect(stmt.expression.type).toBe("CompoundAssignmentExpression");
+      expect(stmt.expression.operator).toBe("+=");
+      expect(stmt.expression.name).toBe("x");
+    });
+
+    it("parses all compound operators", () => {
+      const ops = ["+=", "-=", "*=", "/=", "%="];
+      for (const op of ops) {
+        const ast = parseSource(`int main() { x ${op} 1; return 0; }`);
+        const func = ast.declarations[0] as any;
+        expect(func.body[0].expression.operator).toBe(op);
+      }
+    });
+  });
 });

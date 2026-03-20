@@ -24,6 +24,8 @@ const SIMPLE_TOKENS: Record<string, TokenType> = {
   "/": TokenType.SLASH,
   "%": TokenType.PERCENT,
   "&": TokenType.AMPERSAND,
+  "[": TokenType.LBRACKET,
+  "]": TokenType.RBRACKET,
 };
 
 function isDigit(ch: string): boolean {
@@ -95,6 +97,24 @@ export function tokenize(source: string): Token[] {
       continue;
     }
 
+    // Skip single-line comments
+    if (ch === "/" && peekChar() === "/") {
+      pos += 2; col += 2;
+      while (pos < source.length && source[pos] !== "\n") { pos++; col++; }
+      continue;
+    }
+
+    // Skip multi-line comments
+    if (ch === "/" && peekChar() === "*") {
+      pos += 2; col += 2;
+      while (pos < source.length - 1 && !(source[pos] === "*" && source[pos + 1] === "/")) {
+        if (source[pos] === "\n") { line++; col = 1; } else { col++; }
+        pos++;
+      }
+      if (pos < source.length - 1) { pos += 2; col += 2; } // skip */
+      continue;
+    }
+
     // Two-character operators (must check before single-char)
     if (ch === "=" && peekChar() === "=") {
       tokens.push({ type: TokenType.EQ, value: "==", line, col });
@@ -102,6 +122,46 @@ export function tokenize(source: string): Token[] {
     }
     if (ch === "!" && peekChar() === "=") {
       tokens.push({ type: TokenType.NEQ, value: "!=", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "!") {
+      tokens.push({ type: TokenType.BANG, value: "!", line, col });
+      pos++; col++; continue;
+    }
+    if (ch === "&" && peekChar() === "&") {
+      tokens.push({ type: TokenType.AND_AND, value: "&&", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "|" && peekChar() === "|") {
+      tokens.push({ type: TokenType.PIPE_PIPE, value: "||", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "+" && peekChar() === "+") {
+      tokens.push({ type: TokenType.PLUS_PLUS, value: "++", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "-" && peekChar() === "-") {
+      tokens.push({ type: TokenType.MINUS_MINUS, value: "--", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "+" && peekChar() === "=") {
+      tokens.push({ type: TokenType.PLUS_EQUALS, value: "+=", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "-" && peekChar() === "=") {
+      tokens.push({ type: TokenType.MINUS_EQUALS, value: "-=", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "*" && peekChar() === "=") {
+      tokens.push({ type: TokenType.STAR_EQUALS, value: "*=", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "/" && peekChar() === "=") {
+      tokens.push({ type: TokenType.SLASH_EQUALS, value: "/=", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "%" && peekChar() === "=") {
+      tokens.push({ type: TokenType.PERCENT_EQUALS, value: "%=", line, col });
       pos += 2; col += 2; continue;
     }
     if (ch === "<" && peekChar() === "=") {
@@ -118,6 +178,16 @@ export function tokenize(source: string): Token[] {
     }
     if (ch === ">") {
       tokens.push({ type: TokenType.GT, value: ">", line, col });
+      pos++; col++; continue;
+    }
+
+    // Ternary operators
+    if (ch === "?") {
+      tokens.push({ type: TokenType.QUESTION, value: "?", line, col });
+      pos++; col++; continue;
+    }
+    if (ch === ":") {
+      tokens.push({ type: TokenType.COLON, value: ":", line, col });
       pos++; col++; continue;
     }
 

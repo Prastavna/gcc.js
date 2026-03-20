@@ -7,6 +7,7 @@ const KEYWORDS: Record<string, TokenType> = {
   char: TokenType.CHAR,
   long: TokenType.LONG,
   sizeof: TokenType.SIZEOF,
+  struct: TokenType.STRUCT,
   return: TokenType.RETURN,
   if: TokenType.IF,
   else: TokenType.ELSE,
@@ -29,6 +30,7 @@ const SIMPLE_TOKENS: Record<string, TokenType> = {
   "&": TokenType.AMPERSAND,
   "[": TokenType.LBRACKET,
   "]": TokenType.RBRACKET,
+  ".": TokenType.DOT,
 };
 
 function isDigit(ch: string): boolean {
@@ -170,6 +172,10 @@ export function tokenize(source: string): Token[] {
     }
     if (ch === "+" && peekChar() === "+") {
       tokens.push({ type: TokenType.PLUS_PLUS, value: "++", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "-" && peekChar() === ">") {
+      tokens.push({ type: TokenType.ARROW, value: "->", line, col });
       pos += 2; col += 2; continue;
     }
     if (ch === "-" && peekChar() === "-") {

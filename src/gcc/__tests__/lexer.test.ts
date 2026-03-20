@@ -506,4 +506,40 @@ describe("lexer", () => {
       expect(tokens[0].value).toBe("92");
     });
   });
+
+  describe("struct tokens (milestone 10)", () => {
+    it("tokenizes struct keyword", () => {
+      const tokens = tokenize("struct");
+      expect(tokens[0].type).toBe(TokenType.STRUCT);
+    });
+
+    it("tokenizes . as DOT", () => {
+      const tokens = tokenize("p.x");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([TokenType.IDENTIFIER, TokenType.DOT, TokenType.IDENTIFIER]);
+    });
+
+    it("tokenizes -> as ARROW", () => {
+      const tokens = tokenize("p->x");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([TokenType.IDENTIFIER, TokenType.ARROW, TokenType.IDENTIFIER]);
+    });
+
+    it("distinguishes -> from -- and -", () => {
+      const tokens = tokenize("p->x p-- p-1");
+      const ops = tokens.filter(t => [TokenType.ARROW, TokenType.MINUS_MINUS, TokenType.MINUS].includes(t.type));
+      expect(ops.map(t => t.type)).toEqual([TokenType.ARROW, TokenType.MINUS_MINUS, TokenType.MINUS]);
+    });
+
+    it("tokenizes struct definition", () => {
+      const tokens = tokenize("struct Point { int x; int y; };");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.STRUCT, TokenType.IDENTIFIER, TokenType.LBRACE,
+        TokenType.INT, TokenType.IDENTIFIER, TokenType.SEMICOLON,
+        TokenType.INT, TokenType.IDENTIFIER, TokenType.SEMICOLON,
+        TokenType.RBRACE, TokenType.SEMICOLON,
+      ]);
+    });
+  });
 });

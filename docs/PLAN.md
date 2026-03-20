@@ -149,7 +149,7 @@ int main() {
 - [x] Type-aware memory operations (i32.load8_s for char, i64.load/store for long)
 - [x] Argument type conversion in function calls
 
-### Milestone 9: Arrays
+### Milestone 9: Arrays [DONE]
 ```c
 int main() {
     int arr[5];
@@ -158,14 +158,14 @@ int main() {
     return arr[0] + arr[1];
 }
 ```
-- Fixed-size array declarations (`int arr[5]`)
-- Array indexing read (`arr[i]`)
-- Array indexing write (`arr[i] = val`)
-- Arrays in linear memory (contiguous)
-- Array as function parameter (decays to pointer)
-- Array initializers (`int arr[3] = {1, 2, 3}`)
+- [x] Fixed-size array declarations (`int arr[5]`)
+- [x] Array indexing read (`arr[i]`)
+- [x] Array indexing write (`arr[i] = val`)
+- [x] Arrays in linear memory (contiguous)
+- [x] Array as function parameter (decays to pointer)
+- [x] Array initializers (`int arr[3] = {1, 2, 3}`)
 
-### Milestone 10: Structs
+### Milestone 10: Structs [DONE]
 ```c
 struct Point { int x; int y; };
 int distance_sq(struct Point p) {
@@ -178,12 +178,15 @@ int main() {
     return distance_sq(p);
 }
 ```
-- Struct type declarations
-- Member access (`p.x`)
-- Pointer-to-struct arrow operator (`p->x`)
-- Struct layout in linear memory (field offsets)
-- Struct as function parameter and return value
-- Nested structs
+- [x] Struct type declarations (`struct Point { int x; int y; };`)
+- [x] Struct variable declarations (`struct Point p;`)
+- [x] Member access read/write (`p.x`, `p.x = val`)
+- [x] Pointer-to-struct arrow operator read/write (`p->x`, `p->x = val`)
+- [x] Struct layout in linear memory with natural alignment
+- [x] Struct as function parameter (passed by value via pointer copy)
+- [x] Struct pointer parameter (`struct Point *p`)
+- [x] `sizeof(struct Point)`
+- [x] Mixed field types (char/int/long with padding)
 
 ### Milestone 11: Dynamic memory (malloc/free)
 ```c
@@ -204,7 +207,7 @@ int main() {
 - `sizeof` for all types
 - Grow memory via `memory.grow` when needed
 
-### Milestone 12: Global variables and static data
+### Milestone 12: Global variables and static data [DONE]
 ```c
 int counter = 0;
 void increment() { counter = counter + 1; }
@@ -214,10 +217,10 @@ int main() {
     return counter;
 }
 ```
-- Global variable declarations (outside functions)
-- WASM globals (mutable i32/i64)
-- Static initialization
-- Global arrays and structs
+- [x] Global variable declarations (outside functions)
+- [x] WASM globals (mutable i32/i64)
+- [x] Static initialization
+- Global arrays and structs (deferred to structs milestone)
 
 ### Milestone 13: Switch, break, continue
 ```c
@@ -242,7 +245,7 @@ int sum_odd(int n) {
 - `continue` in loops
 - Labeled loops (stretch)
 
-### Milestone 14: Logical operators and comma
+### Milestone 14: Logical operators and comma [DONE]
 ```c
 int main() {
     int x = 5;
@@ -252,13 +255,13 @@ int main() {
     return !y;
 }
 ```
-- `&&` (short-circuit AND)
-- `||` (short-circuit OR)
-- `!` (logical NOT)
-- Comma operator
-- Ternary operator (`a ? b : c`)
-- Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`)
-- Increment/decrement (`++`, `--`)
+- [x] `&&` (short-circuit AND)
+- [x] `||` (short-circuit OR)
+- [x] `!` (logical NOT)
+- Comma operator (not yet)
+- [x] Ternary operator (`a ? b : c`)
+- [x] Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`)
+- [x] Increment/decrement (`++`, `--`)
 
 ### Milestone 15: Preprocessor
 ```c

@@ -573,4 +573,72 @@ describe("parser", () => {
       expect(ret.expression.type).toBe("BinaryExpression");
     });
   });
+
+  describe("structs (milestone 10)", () => {
+    it("parses struct definition", () => {
+      const ast = parseSource("struct Point { int x; int y; };");
+      expect(ast.declarations.length).toBe(1);
+      const decl = ast.declarations[0] as any;
+      expect(decl.type).toBe("StructDeclaration");
+      expect(decl.name).toBe("Point");
+      expect(decl.fields.length).toBe(2);
+      expect(decl.fields[0].name).toBe("x");
+      expect(decl.fields[0].typeSpec).toBe("int");
+      expect(decl.fields[1].name).toBe("y");
+      expect(decl.fields[1].typeSpec).toBe("int");
+    });
+
+    it("parses struct variable declaration", () => {
+      const ast = parseSource("struct Point { int x; int y; }; int main() { struct Point p; return 0; }");
+      const func = ast.declarations[1] as any;
+      expect(func.body[0].type).toBe("StructVariableDeclaration");
+      expect(func.body[0].name).toBe("p");
+      expect(func.body[0].structName).toBe("Point");
+    });
+
+    it("parses p.x as MemberAccessExpression", () => {
+      const ast = parseSource("struct Point { int x; }; int main() { return p.x; }");
+      const func = ast.declarations[1] as any;
+      const expr = func.body[0].expression;
+      expect(expr.type).toBe("MemberAccessExpression");
+      expect(expr.object).toBe("p");
+      expect(expr.member).toBe("x");
+    });
+
+    it("parses p.x = 3 as MemberAssignmentExpression", () => {
+      const ast = parseSource("struct Point { int x; }; int main() { p.x = 3; return 0; }");
+      const func = ast.declarations[1] as any;
+      const expr = func.body[0].expression;
+      expect(expr.type).toBe("MemberAssignmentExpression");
+      expect(expr.object).toBe("p");
+      expect(expr.member).toBe("x");
+      expect(expr.value.type).toBe("IntegerLiteral");
+    });
+
+    it("parses p->x as ArrowAccessExpression", () => {
+      const ast = parseSource("struct Point { int x; }; int main() { return p->x; }");
+      const func = ast.declarations[1] as any;
+      const expr = func.body[0].expression;
+      expect(expr.type).toBe("ArrowAccessExpression");
+      expect(expr.pointer).toBe("p");
+      expect(expr.member).toBe("x");
+    });
+
+    it("parses p->x = 10 as ArrowAssignmentExpression", () => {
+      const ast = parseSource("struct Point { int x; }; int main() { p->x = 10; return 0; }");
+      const func = ast.declarations[1] as any;
+      const expr = func.body[0].expression;
+      expect(expr.type).toBe("ArrowAssignmentExpression");
+      expect(expr.pointer).toBe("p");
+      expect(expr.member).toBe("x");
+      expect(expr.value.type).toBe("IntegerLiteral");
+    });
+
+    it("parses struct param in function", () => {
+      const ast = parseSource("struct Point { int x; }; int f(struct Point p) { return p.x; }");
+      const func = ast.declarations[1] as any;
+      expect(func.params[0].typeSpec).toEqual({ kind: "struct", name: "Point" });
+      expect(func.params[0].name).toBe("p");
+    });
+  });
 });

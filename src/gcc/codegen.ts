@@ -1,4 +1,4 @@
-import type { Program, FunctionDeclaration, ExternFunctionDeclaration, GlobalVariableDeclaration, Statement, Expression, TypeSpecifier } from "./types.ts";
+import type { Program, FunctionDeclaration, ExternFunctionDeclaration, GlobalVariableDeclaration, StructDeclaration, Statement, Expression, TypeSpecifier } from "./types.ts";
 import {
   WASM_MAGIC,
   WASM_VERSION,
@@ -55,11 +55,40 @@ function emitConversion(out: number[], from: CType, to: CType): void {
   }
 }
 
+// ── Struct layout types ──────────────────────────────────
+
+type StructFieldInfo = { name: string; ctype: CType; offset: number };
+type StructDef = { name: string; fields: StructFieldInfo[]; size: number };
+
+function typeSpecToCType(ts: TypeSpecifier): CType {
+  if (typeof ts === "string") return ts as CType;
+  // struct type specifier used as pointer type → i32
+  return "int";
+}
+
+function computeStructLayout(decl: StructDeclaration): StructDef {
+  let offset = 0;
+  const fields: StructFieldInfo[] = [];
+  for (const f of decl.fields) {
+    const ctype = typeSpecToCType(f.typeSpec);
+    const size = sizeOfType(ctype);
+    // Natural alignment
+    while (offset % size !== 0) offset++;
+    fields.push({ name: f.name, ctype, offset });
+    offset += size;
+  }
+  // Align total size to largest field alignment
+  const maxAlign = Math.max(...fields.map(f => sizeOfType(f.ctype)), 1);
+  while (offset % maxAlign !== 0) offset++;
+  return { name: decl.name, fields, size: offset };
+}
+
 // ── Module-level state (reset per generate() call) ───────
 
 let memoryUsed = false;
 let nextMemAddr = 0;
 let stringData: { addr: number; bytes: number[] }[] = [];
+let structDefs: Map<string, StructDef> = new Map();
 
 /**
  * Generates a WASM binary module from a Program AST.
@@ -68,15 +97,23 @@ export function generate(ast: Program): Uint8Array {
   memoryUsed = false;
   nextMemAddr = 0;
   stringData = [];
+  structDefs = new Map();
 
   // Separate declarations by kind
   const externs: ExternFunctionDeclaration[] = [];
   const funcs: FunctionDeclaration[] = [];
   const globals: GlobalVariableDeclaration[] = [];
+  const structs: StructDeclaration[] = [];
   for (const d of ast.declarations) {
     if (d.type === "ExternFunctionDeclaration") externs.push(d);
     else if (d.type === "FunctionDeclaration") funcs.push(d);
     else if (d.type === "GlobalVariableDeclaration") globals.push(d);
+    else if (d.type === "StructDeclaration") structs.push(d);
+  }
+
+  // Build struct layout registry
+  for (const s of structs) {
+    structDefs.set(s.name, computeStructLayout(s));
   }
 
   // Build global variable name -> WASM global index map + types
@@ -84,19 +121,34 @@ export function generate(ast: Program): Uint8Array {
   const globalTypes = new Map<string, CType>();
   for (let i = 0; i < globals.length; i++) {
     globalIndex.set(globals[i].name, i);
-    globalTypes.set(globals[i].name, globals[i].typeSpec as CType);
+    globalTypes.set(globals[i].name, typeSpecToCType(globals[i].typeSpec));
   }
 
   // Build function return type + param type maps
   const funcReturnTypes = new Map<string, CType>();
   const funcParamTypes = new Map<string, CType[]>();
+  // Maps funcName -> paramIndex -> structName for struct params
+  const funcStructParams = new Map<string, Map<number, string>>();
   for (const ext of externs) {
-    funcReturnTypes.set(ext.name, (ext.returnType || "int") as CType);
-    funcParamTypes.set(ext.name, ext.params.map(p => (p.typeSpec || "int") as CType));
+    funcReturnTypes.set(ext.name, typeSpecToCType(ext.returnType || "int"));
+    funcParamTypes.set(ext.name, ext.params.map(p => typeSpecToCType(p.typeSpec || "int")));
   }
   for (const func of funcs) {
-    funcReturnTypes.set(func.name, (func.returnType || "int") as CType);
-    funcParamTypes.set(func.name, func.params.map(p => (p.typeSpec || "int") as CType));
+    funcReturnTypes.set(func.name, typeSpecToCType(func.returnType || "int"));
+    const paramCTypes: CType[] = [];
+    const structParams = new Map<number, string>();
+    for (let i = 0; i < func.params.length; i++) {
+      const ts = func.params[i].typeSpec;
+      if (typeof ts === "object" && ts.kind === "struct" && !func.params[i].pointer) {
+        // struct value param: passed as i32 pointer (caller copies)
+        paramCTypes.push("int");
+        structParams.set(i, ts.name);
+      } else {
+        paramCTypes.push(typeSpecToCType(ts || "int"));
+      }
+    }
+    funcParamTypes.set(func.name, paramCTypes);
+    if (structParams.size > 0) funcStructParams.set(func.name, structParams);
   }
 
   // String data starts at address 1024 (leave 0-1023 for stack variables)
@@ -146,16 +198,16 @@ export function generate(ast: Program): Uint8Array {
   // Type indices for imported functions
   const importTypeIndices: number[] = [];
   for (const ext of externs) {
-    const paramTypes = ext.params.map(p => wasmTypeFor((p.typeSpec || "int") as CType));
-    const retType = wasmTypeFor((ext.returnType || "int") as CType);
+    const paramTypes = ext.params.map(p => wasmTypeFor(typeSpecToCType(p.typeSpec || "int")));
+    const retType = wasmTypeFor(typeSpecToCType(ext.returnType || "int"));
     importTypeIndices.push(getTypeIdx(paramTypes, retType));
   }
 
   // Type indices for local functions
   const funcTypeIndices: number[] = [];
   for (const func of funcs) {
-    const paramTypes = func.params.map(p => wasmTypeFor((p.typeSpec || "int") as CType));
-    const retType = wasmTypeFor((func.returnType || "int") as CType);
+    const paramTypes = func.params.map(p => wasmTypeFor(typeSpecToCType(p.typeSpec || "int")));
+    const retType = wasmTypeFor(typeSpecToCType(func.returnType || "int"));
     funcTypeIndices.push(getTypeIdx(paramTypes, retType));
   }
 
@@ -172,7 +224,7 @@ export function generate(ast: Program): Uint8Array {
   const memorySection = memoryUsed ? buildMemorySection() : [];
   const globalSection = globals.length > 0 ? buildGlobalSection(globals) : [];
   const exportSection = buildExportSection(funcs, importCount);
-  const codeSection = buildCodeSection(funcs, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes);
+  const codeSection = buildCodeSection(funcs, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams);
   const dataSection = stringData.length > 0 ? buildDataSection() : [];
 
   const bytes: number[] = [
@@ -214,6 +266,7 @@ function collectStringsFromStatement(stmt: Statement, cb: (s: string) => void): 
     case "ArrayDeclaration":
       if (stmt.initializer) stmt.initializer.forEach(e => collectStringsFromExpr(e, cb));
       break;
+    case "StructVariableDeclaration": break;
     case "ExpressionStatement": collectStringsFromExpr(stmt.expression, cb); break;
     case "IfStatement":
       collectStringsFromExpr(stmt.condition, cb);
@@ -248,6 +301,8 @@ function collectStringsFromExpr(expr: Expression, cb: (s: string) => void): void
     case "ArrayAccessExpression": collectStringsFromExpr(expr.index, cb); break;
     case "ArrayIndexAssignment": collectStringsFromExpr(expr.index, cb); collectStringsFromExpr(expr.value, cb); break;
     case "CastExpression": collectStringsFromExpr(expr.operand, cb); break;
+    case "MemberAssignmentExpression": collectStringsFromExpr(expr.value, cb); break;
+    case "ArrowAssignmentExpression": collectStringsFromExpr(expr.value, cb); break;
     default: break;
   }
 }
@@ -255,6 +310,10 @@ function collectStringsFromExpr(expr: Expression, cb: (s: string) => void): void
 // ── Memory usage detection ───────────────────────────────
 
 function functionUsesMemory(func: FunctionDeclaration): boolean {
+  // Struct params use memory
+  for (const p of func.params) {
+    if (typeof p.typeSpec === "object" && p.typeSpec.kind === "struct") return true;
+  }
   return statementsUseMemory(func.body);
 }
 
@@ -268,6 +327,7 @@ function stmtUsesMemory(stmt: Statement): boolean {
     case "ReturnStatement": return exprUsesMemory(stmt.expression);
     case "VariableDeclaration": return exprUsesMemory(stmt.initializer);
     case "ArrayDeclaration": return true;
+    case "StructVariableDeclaration": return true;
     case "ExpressionStatement": return exprUsesMemory(stmt.expression);
     case "IfStatement":
       return exprUsesMemory(stmt.condition) || statementsUseMemory(stmt.consequent) ||
@@ -282,7 +342,9 @@ function stmtUsesMemory(stmt: Statement): boolean {
 function exprUsesMemory(expr: Expression): boolean {
   switch (expr.type) {
     case "AddressOfExpression": case "DereferenceExpression": case "DereferenceAssignment": case "StringLiteral":
-    case "ArrayAccessExpression": case "ArrayIndexAssignment": return true;
+    case "ArrayAccessExpression": case "ArrayIndexAssignment":
+    case "MemberAccessExpression": case "MemberAssignmentExpression":
+    case "ArrowAccessExpression": case "ArrowAssignmentExpression": return true;
     case "BinaryExpression": return exprUsesMemory(expr.left) || exprUsesMemory(expr.right);
     case "UnaryExpression": return exprUsesMemory(expr.operand);
     case "AssignmentExpression": return exprUsesMemory(expr.value);
@@ -376,6 +438,10 @@ function evalConstExpr(expr: Expression): number | null {
       }
     }
     case "SizeofExpression":
+      if (typeof expr.targetType === "object" && expr.targetType.kind === "struct") {
+        const def = structDefs.get(expr.targetType.name);
+        return def ? def.size : null;
+      }
       return sizeOfType(expr.targetType as CType);
     default:
       return null;
@@ -388,7 +454,7 @@ function evalConstExpr(expr: Expression): number | null {
 function buildGlobalSection(globals: GlobalVariableDeclaration[]): number[] {
   const content: number[] = [...encodeUnsignedLEB128(globals.length)];
   for (const g of globals) {
-    const ctype = (g.typeSpec || "int") as CType;
+    const ctype = typeSpecToCType(g.typeSpec || "int");
     const wt = wasmTypeFor(ctype);
     content.push(wt, 0x01); // mutable
     const val = evalConstExpr(g.initializer);
@@ -427,10 +493,11 @@ function buildCodeSection(
   globalTypes: Map<string, CType>,
   funcReturnTypes: Map<string, CType>,
   funcParamTypes: Map<string, CType[]>,
+  funcStructParams: Map<string, Map<number, string>>,
 ): number[] {
   const bodies: number[] = [];
   for (const func of funcs) {
-    bodies.push(...buildFunctionBody(func, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes));
+    bodies.push(...buildFunctionBody(func, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams));
   }
   const content = [...encodeUnsignedLEB128(funcs.length), ...bodies];
   return makeSection(Section.CODE, content);
@@ -469,6 +536,7 @@ function findATInStatement(stmt: Statement, taken: Set<string>): void {
     case "ArrayDeclaration":
       if (stmt.initializer) stmt.initializer.forEach(e => findATInExpr(e, taken));
       break;
+    case "StructVariableDeclaration": break;
     case "ExpressionStatement": findATInExpr(stmt.expression, taken); break;
     case "IfStatement":
       findATInExpr(stmt.condition, taken);
@@ -503,6 +571,8 @@ function findATInExpr(expr: Expression, taken: Set<string>): void {
     case "ArrayAccessExpression": findATInExpr(expr.index, taken); break;
     case "ArrayIndexAssignment": findATInExpr(expr.index, taken); findATInExpr(expr.value, taken); break;
     case "CastExpression": findATInExpr(expr.operand, taken); break;
+    case "MemberAssignmentExpression": findATInExpr(expr.value, taken); break;
+    case "ArrowAssignmentExpression": findATInExpr(expr.value, taken); break;
     default: break;
   }
 }
@@ -515,12 +585,16 @@ type Ctx = {
   memVars: Map<string, number>;
   memVarTypes: Map<string, CType>;
   arrayVars: Map<string, { addr: number; size: number }>;
+  structVars: Map<string, { addr: number; structName: string }>;
+  structParamVars: Map<string, { localIdx: number; structName: string }>;
   funcIndex: Map<string, number>;
   stringMap: Map<string, number>;
   globalIndex: Map<string, number>;
   globalTypes: Map<string, CType>;
   funcReturnTypes: Map<string, CType>;
   funcParamTypes: Map<string, CType[]>;
+  funcStructParams: Map<string, Map<number, string>>;
+  varStructPtrTypes: Map<string, string>; // var name -> struct name for pointer-to-struct vars
   returnType: CType;
 };
 
@@ -533,7 +607,7 @@ function collectLocalsFromStatements(
   let count = 0;
   for (const stmt of stmts) {
     if (stmt.type === "VariableDeclaration" && !locals.has(stmt.name) && !addressTaken.has(stmt.name)) {
-      const ctype = (stmt.typeSpec || "int") as CType;
+      const ctype = typeSpecToCType(stmt.typeSpec || "int");
       locals.set(stmt.name, offset + count);
       localTypes.set(stmt.name, ctype);
       if (ctype === "long") i64Count.n++; else i32Count.n++;
@@ -555,6 +629,7 @@ function collectLocalsFromStatements(
 function collectAllVarNames(stmts: Statement[], names: Set<string>): void {
   for (const s of stmts) {
     if (s.type === "VariableDeclaration") names.add(s.name);
+    if (s.type === "StructVariableDeclaration") names.add(s.name);
     if (s.type === "IfStatement") { collectAllVarNames(s.consequent, names); if (s.alternate) collectAllVarNames(s.alternate, names); }
     if (s.type === "WhileStatement") collectAllVarNames(s.body, names);
     if (s.type === "ForStatement") { collectAllVarNames([s.init], names); collectAllVarNames(s.body, names); }
@@ -564,7 +639,7 @@ function collectAllVarNames(stmts: Statement[], names: Set<string>): void {
 /** Collect type specs for all variable declarations */
 function collectVarTypes(stmts: Statement[], types: Map<string, CType>): void {
   for (const s of stmts) {
-    if (s.type === "VariableDeclaration") types.set(s.name, (s.typeSpec || "int") as CType);
+    if (s.type === "VariableDeclaration") types.set(s.name, typeSpecToCType(s.typeSpec || "int"));
     if (s.type === "IfStatement") { collectVarTypes(s.consequent, types); if (s.alternate) collectVarTypes(s.alternate, types); }
     if (s.type === "WhileStatement") collectVarTypes(s.body, types);
     if (s.type === "ForStatement") { collectVarTypes([s.init], types); collectVarTypes(s.body, types); }
@@ -579,6 +654,7 @@ function buildFunctionBody(
   globalTypes: Map<string, CType>,
   funcReturnTypes: Map<string, CType>,
   funcParamTypes: Map<string, CType[]>,
+  funcStructParams: Map<string, Map<number, string>>,
 ): number[] {
   const addressTaken = findAddressTakenVars(func);
   const locals = new Map<string, number>();
@@ -589,7 +665,7 @@ function buildFunctionBody(
   // maintain declaration order. The key insight: params are indexed by
   // their declaration order, and their types are fixed by the function signature.
   for (let i = 0; i < func.params.length; i++) {
-    const ptype = (func.params[i].typeSpec || "int") as CType;
+    const ptype = typeSpecToCType(func.params[i].typeSpec || "int");
     if (!addressTaken.has(func.params[i].name)) {
       locals.set(func.params[i].name, i);
       localTypes.set(func.params[i].name, ptype);
@@ -621,7 +697,7 @@ function buildFunctionBody(
     for (const stmt of stmts) {
       if (stmt.type === "VariableDeclaration" && !addressTaken.has(stmt.name)) {
         if (!allDeclaredVars.find(v => v.name === stmt.name)) {
-          const ctype = (stmt.typeSpec || "int") as CType;
+          const ctype = typeSpecToCType(stmt.typeSpec || "int");
           allDeclaredVars.push({ name: stmt.name, ctype });
         }
       }
@@ -657,7 +733,7 @@ function buildFunctionBody(
 
   for (let i = 0; i < func.params.length; i++) {
     if (addressTaken.has(func.params[i].name)) {
-      const ptype = (func.params[i].typeSpec || "int") as CType;
+      const ptype = typeSpecToCType(func.params[i].typeSpec || "int");
       const size = sizeOfType(ptype);
       // Align to natural alignment
       while (nextMemAddr % size !== 0) nextMemAddr++;
@@ -698,8 +774,54 @@ function buildFunctionBody(
   }
   collectArrayDecls(func.body);
 
-  const returnType = (func.returnType || "int") as CType;
-  const ctx: Ctx = { locals, localTypes, memVars, memVarTypes, arrayVars, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, returnType };
+  // Allocate struct variables in linear memory
+  const structVars = new Map<string, { addr: number; structName: string }>();
+  function collectStructDecls(stmts: Statement[]): void {
+    for (const s of stmts) {
+      if (s.type === "StructVariableDeclaration" && !structVars.has(s.name)) {
+        const def = structDefs.get(s.structName);
+        if (!def) throw new Error(`Unknown struct type '${s.structName}'`);
+        // Align to struct's natural alignment
+        const maxAlign = Math.max(...def.fields.map(f => sizeOfType(f.ctype)), 1);
+        while (nextMemAddr % maxAlign !== 0) nextMemAddr++;
+        structVars.set(s.name, { addr: nextMemAddr, structName: s.structName });
+        nextMemAddr += def.size;
+      }
+      if (s.type === "IfStatement") { collectStructDecls(s.consequent); if (s.alternate) collectStructDecls(s.alternate); }
+      if (s.type === "WhileStatement") collectStructDecls(s.body);
+      if (s.type === "ForStatement") { collectStructDecls([s.init]); collectStructDecls(s.body); }
+    }
+  }
+  collectStructDecls(func.body);
+
+  // Track pointer-to-struct variable types for arrow operator
+  const varStructPtrTypes = new Map<string, string>();
+
+  // Track struct params (passed as i32 pointers)
+  const structParamVars = new Map<string, { localIdx: number; structName: string }>();
+  for (let i = 0; i < func.params.length; i++) {
+    const ts = func.params[i].typeSpec;
+    if (typeof ts === "object" && ts.kind === "struct" && !func.params[i].pointer) {
+      // Struct value param: local contains pointer to copied struct
+      structParamVars.set(func.params[i].name, { localIdx: i, structName: ts.name });
+    } else if (typeof ts === "object" && ts.kind === "struct" && func.params[i].pointer) {
+      // Pointer-to-struct param: track for arrow access
+      varStructPtrTypes.set(func.params[i].name, ts.name);
+    }
+  }
+  function collectStructPtrTypes(stmts: Statement[]): void {
+    for (const s of stmts) {
+      if (s.type === "VariableDeclaration" && typeof s.typeSpec === "object" && s.typeSpec.kind === "struct") {
+        varStructPtrTypes.set(s.name, s.typeSpec.name);
+      }
+      if (s.type === "IfStatement") { collectStructPtrTypes(s.consequent); if (s.alternate) collectStructPtrTypes(s.alternate); }
+      if (s.type === "WhileStatement") collectStructPtrTypes(s.body);
+      if (s.type === "ForStatement") { collectStructPtrTypes([s.init]); collectStructPtrTypes(s.body); }
+    }
+  }
+  collectStructPtrTypes(func.body);
+  const returnType = typeSpecToCType(func.returnType || "int");
+  const ctx: Ctx = { locals, localTypes, memVars, memVarTypes, arrayVars, structVars, structParamVars, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, varStructPtrTypes, returnType };
   const instructions: number[] = [];
 
   for (const ap of atParamCopies) {
@@ -770,6 +892,9 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       }
       break;
     }
+    case "StructVariableDeclaration":
+      // Memory is pre-allocated; nothing to emit
+      break;
     case "ArrayDeclaration":
       if (stmt.initializer) {
         const arrInfo = ctx.arrayVars.get(stmt.name)!;
@@ -838,6 +963,8 @@ function exprProducesValue(expr: Expression): boolean {
     case "CompoundAssignmentExpression":
     case "DereferenceAssignment":
     case "ArrayIndexAssignment":
+    case "MemberAssignmentExpression":
+    case "ArrowAssignmentExpression":
       return false;
     default:
       return true;
@@ -876,6 +1003,10 @@ function inferType(expr: Expression, ctx: Ctx): CType {
     case "DereferenceAssignment": return "void";
     case "ArrayAccessExpression": return "int";
     case "ArrayIndexAssignment": return "void";
+    case "MemberAccessExpression": return "int"; // determined at emit time
+    case "MemberAssignmentExpression": return "void";
+    case "ArrowAccessExpression": return "int";
+    case "ArrowAssignmentExpression": return "void";
   }
 }
 
@@ -914,6 +1045,42 @@ function emitMemStore(out: number[], ctype: CType): void {
       out.push(Op.I32_STORE, 0x02, 0x00);
       break;
   }
+}
+
+// ── Struct field resolution ──────────────────────────────
+
+function resolveStructField(objectName: string, memberName: string, ctx: Ctx): { addr: number | null; fieldInfo: StructFieldInfo } {
+  let structName: string;
+  let addr: number | null = null;
+  if (ctx.structVars.has(objectName)) {
+    const sv = ctx.structVars.get(objectName)!;
+    structName = sv.structName;
+    addr = sv.addr;
+  } else if (ctx.structParamVars.has(objectName)) {
+    structName = ctx.structParamVars.get(objectName)!.structName;
+    addr = null; // address comes from local
+  } else {
+    throw new Error(`'${objectName}' is not a struct variable`);
+  }
+  const def = structDefs.get(structName);
+  if (!def) throw new Error(`Unknown struct type '${structName}'`);
+  const fieldInfo = def.fields.find(f => f.name === memberName);
+  if (!fieldInfo) throw new Error(`Struct '${structName}' has no field '${memberName}'`);
+  return { addr, fieldInfo };
+}
+
+function resolveArrowField(pointerName: string, memberName: string, ctx: Ctx): StructFieldInfo {
+  // Need to figure out which struct this pointer points to
+  // Check pointer variable type annotations - for now we need a way to track this
+  // The pointer variable was declared as `struct Name *p`, so its typeSpec is a StructTypeSpecifier
+  // We stored struct pointer info in varStructPtrTypes
+  const structName = ctx.varStructPtrTypes?.get(pointerName);
+  if (!structName) throw new Error(`Cannot determine struct type for pointer '${pointerName}'`);
+  const def = structDefs.get(structName);
+  if (!def) throw new Error(`Unknown struct type '${structName}'`);
+  const fieldInfo = def.fields.find(f => f.name === memberName);
+  if (!fieldInfo) throw new Error(`Struct '${structName}' has no field '${memberName}'`);
+  return fieldInfo;
 }
 
 // ── Expression emission ──────────────────────────────────
@@ -972,9 +1139,18 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
     case "CharLiteral":
       out.push(Op.I32_CONST, ...encodeSignedLEB128(expr.value));
       return "int";
-    case "SizeofExpression":
-      out.push(Op.I32_CONST, ...encodeSignedLEB128(sizeOfType(expr.targetType as CType)));
+    case "SizeofExpression": {
+      let sz: number;
+      if (typeof expr.targetType === "object" && expr.targetType.kind === "struct") {
+        const def = structDefs.get(expr.targetType.name);
+        if (!def) throw new Error(`Unknown struct type '${expr.targetType.name}'`);
+        sz = def.size;
+      } else {
+        sz = sizeOfType(expr.targetType as CType);
+      }
+      out.push(Op.I32_CONST, ...encodeSignedLEB128(sz));
       return "int";
+    }
     case "StringLiteral": {
       const addr = ctx.stringMap.get(expr.value);
       if (addr === undefined) throw new Error(`Unknown string literal`);
@@ -1037,6 +1213,18 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
         out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr));
         return "int";
       }
+      // Struct name decays to pointer (base address)
+      if (ctx.structVars.has(expr.name)) {
+        const sv = ctx.structVars.get(expr.name)!;
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(sv.addr));
+        return "int";
+      }
+      // Struct param is already a pointer
+      if (ctx.structParamVars.has(expr.name)) {
+        const sp = ctx.structParamVars.get(expr.name)!;
+        out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(sp.localIdx));
+        return "int";
+      }
       return emitVarGet(out, expr.name, ctx);
     case "AssignmentExpression": {
       const varType = getVarType(expr.name, ctx);
@@ -1079,7 +1267,49 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       const fIdx = ctx.funcIndex.get(expr.callee);
       if (fIdx === undefined) throw new Error(`Unknown function '${expr.callee}'`);
       const paramTypes = ctx.funcParamTypes.get(expr.callee);
+      const calleeSP = ctx.funcStructParams.get(expr.callee);
       for (let i = 0; i < expr.args.length; i++) {
+        // Check if this arg is a struct being passed by value
+        if (calleeSP && calleeSP.has(i) && expr.args[i].type === "Identifier") {
+          const argName = expr.args[i].type === "Identifier" ? (expr.args[i] as any).name : null;
+          if (argName) {
+            const structName = calleeSP.get(i)!;
+            const def = structDefs.get(structName);
+            if (def) {
+              // Allocate temp memory for the copy
+              const maxAlign = Math.max(...def.fields.map(f => sizeOfType(f.ctype)), 1);
+              while (nextMemAddr % maxAlign !== 0) nextMemAddr++;
+              const tempAddr = nextMemAddr;
+              nextMemAddr += def.size;
+              // Determine source address
+              let srcAddr: number | null = null;
+              let srcLocalIdx: number | null = null;
+              if (ctx.structVars.has(argName)) {
+                srcAddr = ctx.structVars.get(argName)!.addr;
+              } else if (ctx.structParamVars.has(argName)) {
+                srcLocalIdx = ctx.structParamVars.get(argName)!.localIdx;
+              }
+              // Copy field by field
+              for (const field of def.fields) {
+                out.push(Op.I32_CONST, ...encodeSignedLEB128(tempAddr + field.offset));
+                if (srcAddr !== null) {
+                  out.push(Op.I32_CONST, ...encodeSignedLEB128(srcAddr + field.offset));
+                } else if (srcLocalIdx !== null) {
+                  out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(srcLocalIdx));
+                  if (field.offset > 0) {
+                    out.push(Op.I32_CONST, ...encodeSignedLEB128(field.offset));
+                    out.push(Op.I32_ADD);
+                  }
+                }
+                emitMemLoad(out, field.ctype);
+                emitMemStore(out, field.ctype);
+              }
+              // Push temp address
+              out.push(Op.I32_CONST, ...encodeSignedLEB128(tempAddr));
+              continue;
+            }
+          }
+        }
         const argType = emitExpression(out, expr.args[i], ctx);
         if (paramTypes && i < paramTypes.length) {
           emitConversion(out, argType, paramTypes[i]);
@@ -1089,6 +1319,12 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       return ctx.funcReturnTypes.get(expr.callee) || "int";
     }
     case "AddressOfExpression": {
+      // Check struct vars first
+      if (ctx.structVars.has(expr.name)) {
+        const sv = ctx.structVars.get(expr.name)!;
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(sv.addr));
+        return "int";
+      }
       const addr = ctx.memVars.get(expr.name);
       if (addr === undefined) throw new Error(`Cannot take address of '${expr.name}'`);
       out.push(Op.I32_CONST, ...encodeSignedLEB128(addr));
@@ -1254,6 +1490,62 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
         throw new Error(`Unknown variable '${varName}'`);
       }
       return varType;
+    }
+    case "MemberAccessExpression": {
+      const { addr, fieldInfo } = resolveStructField(expr.object, expr.member, ctx);
+      if (addr !== null) {
+        // Stack-allocated struct var
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(addr + fieldInfo.offset));
+      } else {
+        // Struct param (pointer in local)
+        const sp = ctx.structParamVars.get(expr.object)!;
+        out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(sp.localIdx));
+        if (fieldInfo.offset > 0) {
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(fieldInfo.offset));
+          out.push(Op.I32_ADD);
+        }
+      }
+      emitMemLoad(out, fieldInfo.ctype);
+      return fieldInfo.ctype;
+    }
+    case "MemberAssignmentExpression": {
+      const { addr, fieldInfo } = resolveStructField(expr.object, expr.member, ctx);
+      if (addr !== null) {
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(addr + fieldInfo.offset));
+      } else {
+        const sp = ctx.structParamVars.get(expr.object)!;
+        out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(sp.localIdx));
+        if (fieldInfo.offset > 0) {
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(fieldInfo.offset));
+          out.push(Op.I32_ADD);
+        }
+      }
+      const valType = emitExpression(out, expr.value, ctx);
+      emitConversion(out, valType, fieldInfo.ctype);
+      emitMemStore(out, fieldInfo.ctype);
+      return "void";
+    }
+    case "ArrowAccessExpression": {
+      const fieldInfo = resolveArrowField(expr.pointer, expr.member, ctx);
+      emitVarGet(out, expr.pointer, ctx);
+      if (fieldInfo.offset > 0) {
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(fieldInfo.offset));
+        out.push(Op.I32_ADD);
+      }
+      emitMemLoad(out, fieldInfo.ctype);
+      return fieldInfo.ctype;
+    }
+    case "ArrowAssignmentExpression": {
+      const fieldInfo = resolveArrowField(expr.pointer, expr.member, ctx);
+      emitVarGet(out, expr.pointer, ctx);
+      if (fieldInfo.offset > 0) {
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(fieldInfo.offset));
+        out.push(Op.I32_ADD);
+      }
+      const valType = emitExpression(out, expr.value, ctx);
+      emitConversion(out, valType, fieldInfo.ctype);
+      emitMemStore(out, fieldInfo.ctype);
+      return "void";
     }
   }
 }

@@ -7,6 +7,7 @@ export const TokenType = {
   CHAR: "CHAR",
   LONG: "LONG",
   SIZEOF: "SIZEOF",
+  STRUCT: "STRUCT",
   RETURN: "RETURN",
   IF: "IF",
   ELSE: "ELSE",
@@ -57,6 +58,10 @@ export const TokenType = {
   QUESTION: "QUESTION",  // ?
   COLON: "COLON",        // :
 
+  // Member access
+  DOT: "DOT",                   // .
+  ARROW: "ARROW",               // ->
+
   // Increment/decrement
   PLUS_PLUS: "PLUS_PLUS",     // ++
   MINUS_MINUS: "MINUS_MINUS", // --
@@ -83,7 +88,12 @@ export interface Token {
 
 // ── AST Node Types ───────────────────────────────────────────
 
-export type TypeSpecifier = "int" | "void" | "char" | "long";
+export interface StructTypeSpecifier {
+  kind: "struct";
+  name: string;
+}
+
+export type TypeSpecifier = "int" | "void" | "char" | "long" | StructTypeSpecifier;
 
 export interface IntegerLiteral {
   type: "IntegerLiteral";
@@ -219,6 +229,36 @@ export interface SizeofExpression {
   targetType: TypeSpecifier;
 }
 
+/** p.x — reads a struct field */
+export interface MemberAccessExpression {
+  type: "MemberAccessExpression";
+  object: string;
+  member: string;
+}
+
+/** p.x = val — writes a struct field */
+export interface MemberAssignmentExpression {
+  type: "MemberAssignmentExpression";
+  object: string;
+  member: string;
+  value: Expression;
+}
+
+/** p->x — reads a struct field through a pointer */
+export interface ArrowAccessExpression {
+  type: "ArrowAccessExpression";
+  pointer: string;
+  member: string;
+}
+
+/** p->x = val — writes a struct field through a pointer */
+export interface ArrowAssignmentExpression {
+  type: "ArrowAssignmentExpression";
+  pointer: string;
+  member: string;
+  value: Expression;
+}
+
 export type Expression =
   | IntegerLiteral
   | StringLiteral
@@ -238,7 +278,11 @@ export type Expression =
   | ArrayAccessExpression
   | ArrayIndexAssignment
   | CastExpression
-  | SizeofExpression;
+  | SizeofExpression
+  | MemberAccessExpression
+  | MemberAssignmentExpression
+  | ArrowAccessExpression
+  | ArrowAssignmentExpression;
 
 export interface ReturnStatement {
   type: "ReturnStatement";
@@ -286,10 +330,17 @@ export interface ArrayDeclaration {
   initializer?: Expression[];
 }
 
+export interface StructVariableDeclaration {
+  type: "StructVariableDeclaration";
+  name: string;
+  structName: string;
+}
+
 export type Statement =
   | ReturnStatement
   | VariableDeclaration
   | ArrayDeclaration
+  | StructVariableDeclaration
   | ExpressionStatement
   | IfStatement
   | WhileStatement
@@ -299,6 +350,7 @@ export interface Parameter {
   type: "Parameter";
   name: string;
   typeSpec: TypeSpecifier;
+  pointer?: boolean;
 }
 
 export interface FunctionDeclaration {
@@ -323,7 +375,18 @@ export interface GlobalVariableDeclaration {
   initializer: Expression;
 }
 
-export type Declaration = FunctionDeclaration | ExternFunctionDeclaration | GlobalVariableDeclaration;
+export interface StructFieldDeclaration {
+  name: string;
+  typeSpec: TypeSpecifier;
+}
+
+export interface StructDeclaration {
+  type: "StructDeclaration";
+  name: string;
+  fields: StructFieldDeclaration[];
+}
+
+export type Declaration = FunctionDeclaration | ExternFunctionDeclaration | GlobalVariableDeclaration | StructDeclaration;
 
 export interface Program {
   type: "Program";

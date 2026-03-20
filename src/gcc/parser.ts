@@ -78,7 +78,7 @@ export function parse(tokens: Token[]): Program {
 
   function isTypeSpec(): boolean {
     const t = current().type;
-    return t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG;
+    return t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG || t === TokenType.STRUCT;
   }
 
   function parseTypeSpec(): TypeSpecifier {
@@ -87,8 +87,13 @@ export function parse(tokens: Token[]): Program {
     if (tok.type === TokenType.VOID) { pos++; return "void"; }
     if (tok.type === TokenType.CHAR) { pos++; return "char"; }
     if (tok.type === TokenType.LONG) { pos++; return "long"; }
+    if (tok.type === TokenType.STRUCT) {
+      pos++;
+      const name = expect(TokenType.IDENTIFIER, "struct name").value;
+      return { kind: "struct", name };
+    }
     throw new Error(
-      `Expected type specifier (int/void/char/long) but got '${tok.value || tok.type}' at line ${tok.line}:${tok.col}`
+      `Expected type specifier (int/void/char/long/struct) but got '${tok.value || tok.type}' at line ${tok.line}:${tok.col}`
     );
   }
 
@@ -125,6 +130,26 @@ export function parse(tokens: Token[]): Program {
       }
       // Not an assignment, backtrack — parse as dereference in normal flow
       pos = savedPos;
+    }
+
+    // ident.member = val (member assignment)
+    if (current().type === TokenType.IDENTIFIER && peek(1).type === TokenType.DOT && peek(2).type === TokenType.IDENTIFIER && peek(3).type === TokenType.EQUALS) {
+      const object = current().value;
+      pos += 2; // skip ident and dot
+      const member = expect(TokenType.IDENTIFIER, "member name").value;
+      pos++; // skip =
+      const value = parseAssignment();
+      return { type: "MemberAssignmentExpression", object, member, value };
+    }
+
+    // ident->member = val (arrow assignment)
+    if (current().type === TokenType.IDENTIFIER && peek(1).type === TokenType.ARROW && peek(2).type === TokenType.IDENTIFIER && peek(3).type === TokenType.EQUALS) {
+      const pointer = current().value;
+      pos += 2; // skip ident and ->
+      const member = expect(TokenType.IDENTIFIER, "member name").value;
+      pos++; // skip =
+      const value = parseAssignment();
+      return { type: "ArrowAssignmentExpression", pointer, member, value };
     }
 
     // ident[expr] = val (array index assignment)  OR  ident = val  OR  ident += val
@@ -346,6 +371,18 @@ export function parse(tokens: Token[]): Program {
         expect(TokenType.RBRACKET, "']' after array index");
         return { type: "ArrayAccessExpression", array: name, index };
       }
+      // Member access: ident.member
+      if (current().type === TokenType.DOT) {
+        pos++; // skip .
+        const member = expect(TokenType.IDENTIFIER, "member name after '.'").value;
+        return { type: "MemberAccessExpression", object: name, member };
+      }
+      // Arrow access: ident->member
+      if (current().type === TokenType.ARROW) {
+        pos++; // skip ->
+        const member = expect(TokenType.IDENTIFIER, "member name after '->'").value;
+        return { type: "ArrowAccessExpression", pointer: name, member };
+      }
       if (current().type === TokenType.LPAREN) {
         pos++;
         const args: Expression[] = [];
@@ -364,12 +401,18 @@ export function parse(tokens: Token[]): Program {
 
     if (tok.type === TokenType.LPAREN) {
       // Lookahead: if ( type_keyword ) then it's a cast
-      if (isTypeSpecToken(peek(1).type) && peek(2).type === TokenType.RPAREN) {
-        pos++; // skip (
-        const targetType = parseTypeSpec();
-        expect(TokenType.RPAREN, "')' after cast type");
-        const operand = parseUnary();
-        return { type: "CastExpression", targetType, operand };
+      // For struct: (struct Name) is 4 tokens: ( struct Name )
+      if (isTypeSpecToken(peek(1).type)) {
+        const isCast = peek(1).type === TokenType.STRUCT
+          ? peek(2).type === TokenType.IDENTIFIER && peek(3).type === TokenType.RPAREN
+          : peek(2).type === TokenType.RPAREN;
+        if (isCast) {
+          pos++; // skip (
+          const targetType = parseTypeSpec();
+          expect(TokenType.RPAREN, "')' after cast type");
+          const operand = parseUnary();
+          return { type: "CastExpression", targetType, operand };
+        }
       }
       pos++;
       const expr = parseExpression();
@@ -383,7 +426,7 @@ export function parse(tokens: Token[]): Program {
   }
 
   function isTypeSpecToken(t: TokenType): boolean {
-    return t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG;
+    return t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG || t === TokenType.STRUCT;
   }
 
   // ── Statement parsing ─────────────────────────────────
@@ -403,6 +446,37 @@ export function parse(tokens: Token[]): Program {
   }
 
   function parseStatement(): Statement {
+    // Struct variable declaration: struct Name varname;
+    if (
+      current().type === TokenType.STRUCT &&
+      peek(1).type === TokenType.IDENTIFIER &&
+      peek(2).type === TokenType.IDENTIFIER &&
+      peek(3).type === TokenType.SEMICOLON
+    ) {
+      pos++; // skip struct
+      const structName = expect(TokenType.IDENTIFIER, "struct name").value;
+      const name = expect(TokenType.IDENTIFIER, "variable name").value;
+      expect(TokenType.SEMICOLON, "';' after struct variable declaration");
+      return { type: "StructVariableDeclaration", name, structName };
+    }
+
+    // Pointer-to-struct variable: struct Name *varname = expr;
+    if (
+      current().type === TokenType.STRUCT &&
+      peek(1).type === TokenType.IDENTIFIER &&
+      peek(2).type === TokenType.STAR &&
+      peek(3).type === TokenType.IDENTIFIER &&
+      peek(4).type === TokenType.EQUALS
+    ) {
+      const typeSpec = parseTypeSpec(); // consumes struct + Name
+      pos++; // skip *
+      const name = expect(TokenType.IDENTIFIER, "variable name").value;
+      expect(TokenType.EQUALS, "'=' in variable declaration");
+      const initializer = parseExpression();
+      expect(TokenType.SEMICOLON, "';' after variable declaration");
+      return { type: "VariableDeclaration", name, typeSpec, initializer };
+    }
+
     // Pointer variable declaration: int *p = expr;
     if (
       isTypeSpec() &&
@@ -540,9 +614,10 @@ export function parse(tokens: Token[]): Program {
   function parseOneParam(): Parameter {
     const typeSpec = parseTypeSpec();
     // Skip optional * for pointer params (int *p) — treated as i32 at WASM level
-    if (current().type === TokenType.STAR) pos++;
+    let pointer = false;
+    if (current().type === TokenType.STAR) { pos++; pointer = true; }
     const name = expect(TokenType.IDENTIFIER, "parameter name").value;
-    return { type: "Parameter", name, typeSpec };
+    return { type: "Parameter", name, typeSpec, pointer };
   }
 
   function parseParamList(): Parameter[] {
@@ -556,8 +631,30 @@ export function parse(tokens: Token[]): Program {
     return params;
   }
 
-  /** Parse a top-level declaration: function, extern, or global variable */
+  /** Parse a struct type definition: struct Name { type field; ... }; */
+  function parseStructDeclaration(): Declaration {
+    pos++; // skip 'struct'
+    const name = expect(TokenType.IDENTIFIER, "struct name").value;
+    expect(TokenType.LBRACE, "'{' after struct name");
+    const fields: { name: string; typeSpec: TypeSpecifier }[] = [];
+    while (current().type !== TokenType.RBRACE && current().type !== TokenType.EOF) {
+      const fieldType = parseTypeSpec();
+      const fieldName = expect(TokenType.IDENTIFIER, "field name").value;
+      expect(TokenType.SEMICOLON, "';' after field declaration");
+      fields.push({ name: fieldName, typeSpec: fieldType });
+    }
+    expect(TokenType.RBRACE, "'}' after struct fields");
+    expect(TokenType.SEMICOLON, "';' after struct declaration");
+    return { type: "StructDeclaration", name, fields };
+  }
+
+  /** Parse a top-level declaration: function, extern, global variable, or struct */
   function parseTopLevelDecl(): Declaration {
+    // Struct definition: struct Name { ... };
+    if (current().type === TokenType.STRUCT && peek(1).type === TokenType.IDENTIFIER && peek(2).type === TokenType.LBRACE) {
+      return parseStructDeclaration();
+    }
+
     const typeSpec = parseTypeSpec();
 
     // Skip optional * for pointer types at top level

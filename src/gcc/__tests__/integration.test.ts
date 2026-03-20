@@ -1586,4 +1586,157 @@ describe("integration: compile() end-to-end", () => {
       expect(main()).toBe(90);
     });
   });
+
+  describe("structs (milestone 10)", () => {
+    it("basic struct field write and read", async () => {
+      const source = `
+        struct Point { int x; int y; };
+        int main() {
+          struct Point p;
+          p.x = 3;
+          p.y = 4;
+          return p.x + p.y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+
+    it("struct passed to function (by value)", async () => {
+      const source = `
+        struct Point { int x; int y; };
+        int distance_sq(struct Point p) {
+          return p.x * p.x + p.y * p.y;
+        }
+        int main() {
+          struct Point p;
+          p.x = 3;
+          p.y = 4;
+          return distance_sq(p);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(25);
+    });
+
+    it("two struct variables in same function", async () => {
+      const source = `
+        struct Point { int x; int y; };
+        int main() {
+          struct Point a;
+          struct Point b;
+          a.x = 1;
+          a.y = 2;
+          b.x = 10;
+          b.y = 20;
+          return a.x + a.y + b.x + b.y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(33);
+    });
+
+    it("sizeof(struct Point) with two int fields → 8", async () => {
+      const source = `
+        struct Point { int x; int y; };
+        int main() {
+          return sizeof(struct Point);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(8);
+    });
+
+    it("struct with mixed field types (char + int)", async () => {
+      const source = `
+        struct Mixed { char c; int val; };
+        int main() {
+          struct Mixed m;
+          m.c = 65;
+          m.val = 100;
+          return m.c + m.val;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(165);
+    });
+
+    it("pointer to struct with arrow operator (read)", async () => {
+      const source = `
+        struct Point { int x; int y; };
+        int main() {
+          struct Point p;
+          p.x = 42;
+          p.y = 10;
+          struct Point *ptr = &p;
+          return ptr->x + ptr->y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(52);
+    });
+
+    it("arrow assignment: p->x = 10", async () => {
+      const source = `
+        struct Point { int x; int y; };
+        int main() {
+          struct Point p;
+          p.x = 0;
+          p.y = 0;
+          struct Point *ptr = &p;
+          ptr->x = 10;
+          ptr->y = 20;
+          return p.x + p.y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(30);
+    });
+
+    it("struct pointer param with arrow operator", async () => {
+      const source = `
+        struct Point { int x; int y; };
+        void set_point(struct Point *p, int x, int y) {
+          p->x = x;
+          p->y = y;
+        }
+        int main() {
+          struct Point p;
+          set_point(&p, 5, 7);
+          return p.x + p.y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(12);
+    });
+
+    it("struct field in expression", async () => {
+      const source = `
+        struct Rect { int w; int h; };
+        int area(struct Rect r) {
+          return r.w * r.h;
+        }
+        int main() {
+          struct Rect r;
+          r.w = 5;
+          r.h = 3;
+          return area(r);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(15);
+    });
+
+    it("sizeof(struct Mixed) with char + int has padding", async () => {
+      const source = `
+        struct Mixed { char c; int val; };
+        int main() {
+          return sizeof(struct Mixed);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // char (1) + 3 padding + int (4) = 8
+      expect((instance.exports.main as () => number)()).toBe(8);
+    });
+  });
 });

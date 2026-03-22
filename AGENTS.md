@@ -12,7 +12,7 @@ gcc.js is a client-side C-to-WebAssembly compiler written in pure TypeScript. It
 - **Build:** `bun run build`
 - **Test framework:** Vitest
 
-All tests must pass before any change is considered complete. There are currently 419 tests across 6 test files.
+All tests must pass before any change is considered complete. There are currently 422 tests across 6 test files.
 
 ## Architecture
 
@@ -79,7 +79,7 @@ Integration tests compile C source and run the resulting WASM module, checking r
 
 ## Documentation
 
-- `docs/PLAN.md` — Milestone roadmap with status (Milestones 1-16 done)
+- `docs/PLAN.md` — Milestone roadmap with status (Milestones 1-17 done)
 - `docs/ARCHITECTURE.md` — Compiler internals and design
 - `docs/API.md` — Public API reference and supported C subset
 

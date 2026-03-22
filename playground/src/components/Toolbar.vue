@@ -98,8 +98,8 @@ const examples: { label: string; code: string }[] = [
     code: `int sum_odd(int n) {\n    int sum = 0;\n    for (int i = 0; i < n; i = i + 1) {\n        if (i % 2 == 0) continue;\n        sum = sum + i;\n    }\n    return sum;\n}\n\nint main() {\n    return sum_odd(20);\n}`,
   },
   {
-    label: 'Linked list (malloc)',
-    code: `struct Node { int value; int next; };\n\nint main() {\n    int *values = malloc(5 * sizeof(int));\n    for (int i = 0; i < 5; i = i + 1) {\n        values[i] = (i + 1) * 10;\n    }\n    int sum = 0;\n    for (int i = 0; i < 5; i = i + 1) {\n        sum += values[i];\n    }\n    free(values);\n    return sum;\n}`,
+    label: 'Linked list',
+    code: `struct Node { int value; struct Node *next; };\n\nstruct Node *push(struct Node *head, int val) {\n    struct Node *n = malloc(sizeof(struct Node));\n    n->value = val;\n    n->next = head;\n    return n;\n}\n\nint sum(struct Node *head) {\n    int total = 0;\n    struct Node *cur = head;\n    while (cur != 0) {\n        total = total + cur->value;\n        cur = cur->next;\n    }\n    return total;\n}\n\nint main() {\n    struct Node *list = 0;\n    for (int i = 1; i <= 10; i = i + 1) {\n        list = push(list, i);\n    }\n    return sum(list);\n}`,
   },
   {
     label: '#define constants',

@@ -338,9 +338,11 @@ int main() {
     return sum_list(list);
 }
 ```
-- **Target**: a linked list program that compiles and runs correctly
-- Validates: structs, pointers, malloc, loops, function calls all working together
-- This is the "graduation" test for the compiler
+- [x] **Target**: a linked list program that compiles and runs correctly — **DONE**
+- [x] Validates: structs, pointers, malloc, loops, function calls all working together
+- [x] Fixed: malloc heap starts at non-zero address (NULL-safe)
+- [x] Fixed: struct pointer field declarations (`struct Node *next;`)
+- [x] This is the "graduation" test for the compiler
 
 ---
 

@@ -798,18 +798,26 @@ export function parse(tokens: Token[]): Program {
     return params;
   }
 
+  /** Parse struct/union fields, skipping optional * for pointer fields */
+  function parseFields(): { name: string; typeSpec: TypeSpecifier }[] {
+    const fields: { name: string; typeSpec: TypeSpecifier }[] = [];
+    while (current().type !== TokenType.RBRACE && current().type !== TokenType.EOF) {
+      const fieldType = parseTypeSpec();
+      // Skip optional * for pointer fields (struct Node *next;)
+      if (current().type === TokenType.STAR) pos++;
+      const fieldName = expect(TokenType.IDENTIFIER, "field name").value;
+      expect(TokenType.SEMICOLON, "';' after field declaration");
+      fields.push({ name: fieldName, typeSpec: fieldType });
+    }
+    return fields;
+  }
+
   /** Parse a struct type definition: struct Name { type field; ... }; */
   function parseStructDeclaration(): Declaration {
     pos++; // skip 'struct'
     const name = expect(TokenType.IDENTIFIER, "struct name").value;
     expect(TokenType.LBRACE, "'{' after struct name");
-    const fields: { name: string; typeSpec: TypeSpecifier }[] = [];
-    while (current().type !== TokenType.RBRACE && current().type !== TokenType.EOF) {
-      const fieldType = parseTypeSpec();
-      const fieldName = expect(TokenType.IDENTIFIER, "field name").value;
-      expect(TokenType.SEMICOLON, "';' after field declaration");
-      fields.push({ name: fieldName, typeSpec: fieldType });
-    }
+    const fields = parseFields();
     expect(TokenType.RBRACE, "'}' after struct fields");
     expect(TokenType.SEMICOLON, "';' after struct declaration");
     return { type: "StructDeclaration", name, fields };
@@ -820,13 +828,7 @@ export function parse(tokens: Token[]): Program {
     pos++; // skip 'union'
     const name = expect(TokenType.IDENTIFIER, "union name").value;
     expect(TokenType.LBRACE, "'{' after union name");
-    const fields: { name: string; typeSpec: TypeSpecifier }[] = [];
-    while (current().type !== TokenType.RBRACE && current().type !== TokenType.EOF) {
-      const fieldType = parseTypeSpec();
-      const fieldName = expect(TokenType.IDENTIFIER, "field name").value;
-      expect(TokenType.SEMICOLON, "';' after field declaration");
-      fields.push({ name: fieldName, typeSpec: fieldType });
-    }
+    const fields = parseFields();
     expect(TokenType.RBRACE, "'}' after union fields");
     expect(TokenType.SEMICOLON, "';' after union declaration");
     return { type: "UnionDeclaration", name, fields };

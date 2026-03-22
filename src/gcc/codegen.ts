@@ -525,8 +525,8 @@ function buildGlobalSectionWithHeap(globals: GlobalVariableDeclaration[], includ
   }
   if (includHeapPtr) {
     // Heap pointer: mutable i32, initialized to first free address after static data
-    // Align heap start to 8 bytes
-    const alignedStart = (heapStart + 7) & ~7;
+    // Align heap start to 8 bytes, ensure non-zero so first malloc != NULL
+    const alignedStart = Math.max((heapStart + 7) & ~7, 8);
     content.push(ValType.I32, 0x01); // mutable i32
     content.push(Op.I32_CONST, ...encodeSignedLEB128(alignedStart), Op.END);
   }

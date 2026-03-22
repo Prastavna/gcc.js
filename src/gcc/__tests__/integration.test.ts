@@ -2496,4 +2496,68 @@ describe("integration: compile() end-to-end", () => {
       expect((instance.exports.main as () => number)()).toBe(65);
     });
   });
+
+  // ── Milestone 17: Complete program — linked list graduation test ─────
+  describe("milestone 17: complete program", () => {
+    it("linked list: push 1..10 and sum via traversal (= 55)", async () => {
+      const source = `
+        struct Node { int value; struct Node *next; };
+
+        struct Node *push(struct Node *head, int val) {
+            struct Node *n = malloc(sizeof(struct Node));
+            n->value = val;
+            n->next = head;
+            return n;
+        }
+
+        int sum(struct Node *head) {
+            int total = 0;
+            struct Node *cur = head;
+            while (cur != 0) {
+                total = total + cur->value;
+                cur = cur->next;
+            }
+            return total;
+        }
+
+        int main() {
+            struct Node *list = 0;
+            for (int i = 1; i <= 10; i = i + 1) {
+                list = push(list, i);
+            }
+            return sum(list);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(55);
+    });
+
+    it("malloc returns non-zero (NULL-safe heap)", async () => {
+      const source = `
+        int main() {
+            int *p = malloc(4);
+            return p != 0;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("struct pointer fields store and retrieve addresses", async () => {
+      const source = `
+        struct Node { int value; struct Node *next; };
+        int main() {
+            struct Node *a = malloc(sizeof(struct Node));
+            struct Node *b = malloc(sizeof(struct Node));
+            a->value = 10;
+            b->value = 20;
+            b->next = a;
+            struct Node *retrieved = b->next;
+            return retrieved->value;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+  });
 });

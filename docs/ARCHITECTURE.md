@@ -203,9 +203,13 @@ Unsigned types use unsigned opcodes for division (`div_u`), remainder (`rem_u`),
 ### Memory layout
 
 ```
-0x000 - 0x3FF   Stack variables (address-taken locals, 4 bytes each)
-0x400+          String literal data (null-terminated, 4-byte aligned)
+0x000 - 0x007   Reserved (NULL guard — ensures malloc never returns 0)
+0x008+          Stack variables (address-taken locals, struct instances)
+                String literal data (null-terminated, 4-byte aligned)
+                Heap (bump allocator, 8-byte aligned, grows upward)
 ```
+
+The heap pointer global is initialized to `max(nextStaticAddr, 8)`, ensuring the first `malloc()` call returns a non-zero address. This makes NULL (0) safe to use as a sentinel/end-of-list marker.
 
 ### Control flow mapping
 

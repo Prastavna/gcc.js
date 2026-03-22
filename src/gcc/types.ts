@@ -13,6 +13,11 @@ export const TokenType = {
   ELSE: "ELSE",
   WHILE: "WHILE",
   FOR: "FOR",
+  SWITCH: "SWITCH",
+  CASE: "CASE",
+  DEFAULT: "DEFAULT",
+  BREAK: "BREAK",
+  CONTINUE: "CONTINUE",
 
   // Literals
   NUMBER: "NUMBER",
@@ -331,6 +336,25 @@ export interface ArrayDeclaration {
   initializer?: Expression[];
 }
 
+export interface BreakStatement {
+  type: "BreakStatement";
+}
+
+export interface ContinueStatement {
+  type: "ContinueStatement";
+}
+
+export interface SwitchCase {
+  value: Expression | null; // null for default
+  body: Statement[];
+}
+
+export interface SwitchStatement {
+  type: "SwitchStatement";
+  discriminant: Expression;
+  cases: SwitchCase[];
+}
+
 export interface StructVariableDeclaration {
   type: "StructVariableDeclaration";
   name: string;
@@ -345,7 +369,10 @@ export type Statement =
   | ExpressionStatement
   | IfStatement
   | WhileStatement
-  | ForStatement;
+  | ForStatement
+  | BreakStatement
+  | ContinueStatement
+  | SwitchStatement;
 
 export interface Parameter {
   type: "Parameter";

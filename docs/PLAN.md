@@ -222,7 +222,7 @@ int main() {
 - [x] Static initialization
 - Global arrays and structs (deferred to structs milestone)
 
-### Milestone 13: Switch, break, continue
+### Milestone 13: Switch, break, continue [DONE]
 ```c
 int classify(int x) {
     switch (x) {
@@ -240,10 +240,11 @@ int sum_odd(int n) {
     return sum;
 }
 ```
-- `switch` / `case` / `default` (WASM `br_table`)
-- `break` in loops and switch
-- `continue` in loops
-- Labeled loops (stretch)
+- [x] `switch` / `case` / `default` (nested blocks with dispatch)
+- [x] `break` in loops and switch
+- [x] `continue` in loops (for-loop correctly runs update before looping)
+- [x] Fall-through between cases (natural block nesting)
+- Labeled loops (stretch, deferred)
 
 ### Milestone 14: Logical operators and comma [DONE]
 ```c

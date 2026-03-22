@@ -1864,4 +1864,241 @@ describe("integration: compile() end-to-end", () => {
       expect((instance.exports.main as () => number)()).toBe(55);
     });
   });
+
+  describe("Milestone 13: Switch, break, continue", () => {
+    it("basic switch with cases and default", async () => {
+      const source = `
+        int classify(int x) {
+          switch (x) {
+            case 0: return 0;
+            case 1: return 1;
+            default: return 2;
+          }
+        }
+        int main() {
+          return classify(0) * 100 + classify(1) * 10 + classify(5);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(12);
+    });
+
+    it("switch with break", async () => {
+      const source = `
+        int test(int x) {
+          int result = 0;
+          switch (x) {
+            case 1:
+              result = 10;
+              break;
+            case 2:
+              result = 20;
+              break;
+            default:
+              result = 99;
+              break;
+          }
+          return result;
+        }
+        int main() {
+          return test(1) + test(2) + test(3);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 10 + 20 + 99 = 129
+      expect((instance.exports.main as () => number)()).toBe(129);
+    });
+
+    it("switch fall-through (no break)", async () => {
+      const source = `
+        int test(int x) {
+          int result = 0;
+          switch (x) {
+            case 0:
+              result = result + 1;
+            case 1:
+              result = result + 10;
+            case 2:
+              result = result + 100;
+              break;
+            default:
+              result = 999;
+              break;
+          }
+          return result;
+        }
+        int main() {
+          return test(0);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // case 0: result=1, falls to case 1: result=11, falls to case 2: result=111, break
+      expect((instance.exports.main as () => number)()).toBe(111);
+    });
+
+    it("break in while loop", async () => {
+      const source = `
+        int main() {
+          int i = 0;
+          int sum = 0;
+          while (i < 100) {
+            if (i >= 5) break;
+            sum = sum + i;
+            i = i + 1;
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 0+1+2+3+4 = 10
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+
+    it("break in for loop", async () => {
+      const source = `
+        int main() {
+          int sum = 0;
+          for (int i = 0; i < 100; i = i + 1) {
+            if (i >= 5) break;
+            sum = sum + i;
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+
+    it("continue in while loop", async () => {
+      const source = `
+        int main() {
+          int i = 0;
+          int sum = 0;
+          while (i < 10) {
+            i = i + 1;
+            if (i % 2 == 0) continue;
+            sum = sum + i;
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 1+3+5+7+9 = 25
+      expect((instance.exports.main as () => number)()).toBe(25);
+    });
+
+    it("continue in for loop (update still runs)", async () => {
+      const source = `
+        int sum_odd(int n) {
+          int sum = 0;
+          for (int i = 0; i < n; i = i + 1) {
+            if (i % 2 == 0) continue;
+            sum = sum + i;
+          }
+          return sum;
+        }
+        int main() {
+          return sum_odd(10);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 1+3+5+7+9 = 25
+      expect((instance.exports.main as () => number)()).toBe(25);
+    });
+
+    it("switch inside a for loop with break and continue", async () => {
+      const source = `
+        int main() {
+          int sum = 0;
+          for (int i = 0; i < 10; i = i + 1) {
+            switch (i % 3) {
+              case 0:
+                continue;
+              case 1:
+                sum = sum + i;
+                break;
+              default:
+                sum = sum + i * 2;
+                break;
+            }
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // i=0: skip(0%3=0), i=1: +1(1%3=1), i=2: +4(2%3=2), i=3: skip(3%3=0),
+      // i=4: +4(4%3=1), i=5: +10(5%3=2), i=6: skip(6%3=0),
+      // i=7: +7(7%3=1), i=8: +16(8%3=2), i=9: skip(9%3=0)
+      // 1+4+4+10+7+16 = 42
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("nested loops with break", async () => {
+      const source = `
+        int main() {
+          int count = 0;
+          for (int i = 0; i < 5; i = i + 1) {
+            for (int j = 0; j < 5; j = j + 1) {
+              if (j >= 3) break;
+              count = count + 1;
+            }
+          }
+          return count;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 5 iterations of i, each with 3 iterations of j = 15
+      expect((instance.exports.main as () => number)()).toBe(15);
+    });
+
+    it("switch with only default", async () => {
+      const source = `
+        int main() {
+          int x = 42;
+          switch (x) {
+            default: return 99;
+          }
+          return 0;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(99);
+    });
+
+    it("milestone 13 example: classify function", async () => {
+      const source = `
+        int classify(int x) {
+          switch (x) {
+            case 0: return 0;
+            case 1: return 1;
+            default: return 2;
+          }
+        }
+        int main() {
+          return classify(0) + classify(1) + classify(99);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 0 + 1 + 2 = 3
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+
+    it("milestone 13 example: sum_odd with continue", async () => {
+      const source = `
+        int sum_odd(int n) {
+          int sum = 0;
+          for (int i = 0; i < n; i = i + 1) {
+            if (i % 2 == 0) continue;
+            sum = sum + i;
+          }
+          return sum;
+        }
+        int main() {
+          return sum_odd(10);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(25);
+    });
+  });
 });

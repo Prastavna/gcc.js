@@ -110,12 +110,7 @@ export function parse(tokens: Token[]): Program {
     return parseAssignment();
   }
 
-  function isCompoundAssignOp(): boolean {
-    const t = current().type;
-    return t === TokenType.PLUS_EQUALS || t === TokenType.MINUS_EQUALS ||
-      t === TokenType.STAR_EQUALS || t === TokenType.SLASH_EQUALS ||
-      t === TokenType.PERCENT_EQUALS;
-  }
+
 
   function parseAssignment(): Expression {
     // *expr = val (dereference assignment)
@@ -600,6 +595,62 @@ export function parse(tokens: Token[]): Program {
       expect(TokenType.RPAREN, "')' after for update");
       const body = parseBlockOrStatement();
       return { type: "ForStatement", init, condition, update, body };
+    }
+
+    // Break statement
+    if (current().type === TokenType.BREAK) {
+      pos++;
+      expect(TokenType.SEMICOLON, "';' after 'break'");
+      return { type: "BreakStatement" };
+    }
+
+    // Continue statement
+    if (current().type === TokenType.CONTINUE) {
+      pos++;
+      expect(TokenType.SEMICOLON, "';' after 'continue'");
+      return { type: "ContinueStatement" };
+    }
+
+    // Switch statement
+    if (current().type === TokenType.SWITCH) {
+      pos++;
+      expect(TokenType.LPAREN, "'(' after 'switch'");
+      const discriminant = parseExpression();
+      expect(TokenType.RPAREN, "')' after switch expression");
+      expect(TokenType.LBRACE, "'{' after switch");
+      const cases: Array<{ value: Expression | null; body: Statement[] }> = [];
+      while (current().type !== TokenType.RBRACE) {
+        if (current().type === TokenType.CASE) {
+          pos++;
+          const value = parseExpression();
+          expect(TokenType.COLON, "':' after case value");
+          const body: Statement[] = [];
+          while (
+            current().type !== TokenType.CASE &&
+            current().type !== TokenType.DEFAULT &&
+            current().type !== TokenType.RBRACE
+          ) {
+            body.push(parseStatement());
+          }
+          cases.push({ value, body });
+        } else if (current().type === TokenType.DEFAULT) {
+          pos++;
+          expect(TokenType.COLON, "':' after 'default'");
+          const body: Statement[] = [];
+          while (
+            current().type !== TokenType.CASE &&
+            current().type !== TokenType.DEFAULT &&
+            current().type !== TokenType.RBRACE
+          ) {
+            body.push(parseStatement());
+          }
+          cases.push({ value: null, body });
+        } else {
+          throw new Error(`Expected 'case' or 'default' in switch body, got '${current().value}'`);
+        }
+      }
+      expect(TokenType.RBRACE, "'}' after switch body");
+      return { type: "SwitchStatement", discriminant, cases };
     }
 
     // Expression statement

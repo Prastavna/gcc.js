@@ -294,6 +294,12 @@ function collectStringsFromStatement(stmt: Statement, cb: (s: string) => void): 
       collectStringsFromExpr(stmt.update, cb);
       collectStringsFromStatements(stmt.body, cb);
       break;
+    case "BreakStatement": break;
+    case "ContinueStatement": break;
+    case "SwitchStatement":
+      collectStringsFromExpr(stmt.discriminant, cb);
+      for (const c of stmt.cases) collectStringsFromStatements(c.body, cb);
+      break;
   }
 }
 
@@ -347,6 +353,10 @@ function stmtUsesMemory(stmt: Statement): boolean {
     case "ForStatement":
       return stmtUsesMemory(stmt.init) || exprUsesMemory(stmt.condition) ||
         exprUsesMemory(stmt.update) || statementsUseMemory(stmt.body);
+    case "BreakStatement": return false;
+    case "ContinueStatement": return false;
+    case "SwitchStatement":
+      return exprUsesMemory(stmt.discriminant) || stmt.cases.some(c => statementsUseMemory(c.body));
   }
 }
 
@@ -573,6 +583,12 @@ function findATInStatement(stmt: Statement, taken: Set<string>): void {
       findATInExpr(stmt.update, taken);
       findATInStatements(stmt.body, taken);
       break;
+    case "BreakStatement": break;
+    case "ContinueStatement": break;
+    case "SwitchStatement":
+      findATInExpr(stmt.discriminant, taken);
+      for (const c of stmt.cases) findATInStatements(c.body, taken);
+      break;
   }
 }
 
@@ -616,36 +632,12 @@ type Ctx = {
   funcStructParams: Map<string, Map<number, string>>;
   varStructPtrTypes: Map<string, string>; // var name -> struct name for pointer-to-struct vars
   varPtrTypes: Map<string, CType>; // var name -> pointed-to element type for primitive pointer vars
+  breakDepth: number | null;  // BR depth for break (null = not in a loop/switch)
+  continueDepth: number | null; // BR depth for continue (null = not in a loop)
+  switchTmpIdx: number | null; // local index for switch temp variable
   returnType: CType;
 };
 
-function collectLocalsFromStatements(
-  stmts: Statement[], locals: Map<string, number>,
-  localTypes: Map<string, CType>,
-  addressTaken: Set<string>, offset: number,
-  i32Count: { n: number }, i64Count: { n: number },
-): number {
-  let count = 0;
-  for (const stmt of stmts) {
-    if (stmt.type === "VariableDeclaration" && !locals.has(stmt.name) && !addressTaken.has(stmt.name)) {
-      const ctype = typeSpecToCType(stmt.typeSpec || "int");
-      locals.set(stmt.name, offset + count);
-      localTypes.set(stmt.name, ctype);
-      if (ctype === "long") i64Count.n++; else i32Count.n++;
-      count++;
-    }
-    if (stmt.type === "IfStatement") {
-      count += collectLocalsFromStatements(stmt.consequent, locals, localTypes, addressTaken, offset + count, i32Count, i64Count);
-      if (stmt.alternate) count += collectLocalsFromStatements(stmt.alternate, locals, localTypes, addressTaken, offset + count, i32Count, i64Count);
-    }
-    if (stmt.type === "WhileStatement") count += collectLocalsFromStatements(stmt.body, locals, localTypes, addressTaken, offset + count, i32Count, i64Count);
-    if (stmt.type === "ForStatement") {
-      count += collectLocalsFromStatements([stmt.init], locals, localTypes, addressTaken, offset + count, i32Count, i64Count);
-      count += collectLocalsFromStatements(stmt.body, locals, localTypes, addressTaken, offset + count, i32Count, i64Count);
-    }
-  }
-  return count;
-}
 
 function collectAllVarNames(stmts: Statement[], names: Set<string>): void {
   for (const s of stmts) {
@@ -654,6 +646,7 @@ function collectAllVarNames(stmts: Statement[], names: Set<string>): void {
     if (s.type === "IfStatement") { collectAllVarNames(s.consequent, names); if (s.alternate) collectAllVarNames(s.alternate, names); }
     if (s.type === "WhileStatement") collectAllVarNames(s.body, names);
     if (s.type === "ForStatement") { collectAllVarNames([s.init], names); collectAllVarNames(s.body, names); }
+    if (s.type === "SwitchStatement") { for (const c of s.cases) collectAllVarNames(c.body, names); }
   }
 }
 
@@ -664,6 +657,7 @@ function collectVarTypes(stmts: Statement[], types: Map<string, CType>): void {
     if (s.type === "IfStatement") { collectVarTypes(s.consequent, types); if (s.alternate) collectVarTypes(s.alternate, types); }
     if (s.type === "WhileStatement") collectVarTypes(s.body, types);
     if (s.type === "ForStatement") { collectVarTypes([s.init], types); collectVarTypes(s.body, types); }
+    if (s.type === "SwitchStatement") { for (const c of s.cases) collectVarTypes(c.body, types); }
   }
 }
 
@@ -694,25 +688,9 @@ function buildFunctionBody(
   }
 
   const paramLocalCount = func.params.length;
-  const i32Count = { n: 0 };
-  const i64Count = { n: 0 };
 
-  // We need to be careful about local ordering in WASM.
-  // WASM locals are declared as groups: e.g. [3 x i32, 1 x i64].
-  // But local indices are sequential after params. So we need to:
-  // 1. First pass: find all locals and their types
-  // 2. Assign indices: all i32 locals first, then all i64 locals
-  // This approach is simpler but we need to track which locals are i32 vs i64.
-
-  // Actually, let's keep it simpler: declare each local individually.
-  // WASM allows multiple local groups, so we just enumerate them.
-  // The local index assignment already happens in collectLocalsFromStatements.
-  // But now we need to handle mixed types.
-
-  // Strategy: collect all locals with types first, then assign indices
-  // such that i32 locals come first, then i64 locals.
-
-  // First, collect all non-AT variable declarations with their types
+  // Collect all non-AT variable declarations with their types
+  // Assign indices: i32 locals first, then i64 locals
   const allDeclaredVars: { name: string; ctype: CType }[] = [];
   function collectDeclaredVars(stmts: Statement[]): void {
     for (const stmt of stmts) {
@@ -723,11 +701,24 @@ function buildFunctionBody(
         }
       }
       if (stmt.type === "IfStatement") { collectDeclaredVars(stmt.consequent); if (stmt.alternate) collectDeclaredVars(stmt.alternate); }
-      if (stmt.type === "WhileStatement") collectDeclaredVars(stmt.body);
-      if (stmt.type === "ForStatement") { collectDeclaredVars([stmt.init]); collectDeclaredVars(stmt.body); }
+      else if (stmt.type === "WhileStatement") collectDeclaredVars(stmt.body);
+      else if (stmt.type === "ForStatement") { collectDeclaredVars([stmt.init]); collectDeclaredVars(stmt.body); }
+      else if (stmt.type === "SwitchStatement") { for (const c of stmt.cases) collectDeclaredVars(c.body); }
     }
   }
   collectDeclaredVars(func.body);
+
+  // Detect if function body contains switch statements (need temp local)
+  function hasSwitchStmt(stmts: Statement[]): boolean {
+    for (const s of stmts) {
+      if (s.type === "SwitchStatement") return true;
+      if (s.type === "IfStatement" && (hasSwitchStmt(s.consequent) || (s.alternate && hasSwitchStmt(s.alternate)))) return true;
+      if (s.type === "WhileStatement" && hasSwitchStmt(s.body)) return true;
+      if (s.type === "ForStatement" && hasSwitchStmt(s.body)) return true;
+    }
+    return false;
+  }
+  const needsSwitchTmp = hasSwitchStmt(func.body);
 
   // Partition into i32 and i64 locals
   const i32Locals = allDeclaredVars.filter(v => v.ctype !== "long");
@@ -743,6 +734,10 @@ function buildFunctionBody(
     locals.set(v.name, nextIdx++);
     localTypes.set(v.name, v.ctype);
   }
+
+  // Add switch temp local (i32) if needed
+  const switchTmpIdx = needsSwitchTmp ? nextIdx++ : null;
+  if (needsSwitchTmp) i32Locals.push({ name: "__switch_tmp", ctype: "int" });
 
   const memVars = new Map<string, number>();
   const memVarTypes = new Map<string, CType>();
@@ -791,6 +786,7 @@ function buildFunctionBody(
       if (s.type === "IfStatement") { collectArrayDecls(s.consequent); if (s.alternate) collectArrayDecls(s.alternate); }
       if (s.type === "WhileStatement") collectArrayDecls(s.body);
       if (s.type === "ForStatement") { collectArrayDecls([s.init]); collectArrayDecls(s.body); }
+      if (s.type === "SwitchStatement") { for (const c of s.cases) collectArrayDecls(c.body); }
     }
   }
   collectArrayDecls(func.body);
@@ -811,6 +807,7 @@ function buildFunctionBody(
       if (s.type === "IfStatement") { collectStructDecls(s.consequent); if (s.alternate) collectStructDecls(s.alternate); }
       if (s.type === "WhileStatement") collectStructDecls(s.body);
       if (s.type === "ForStatement") { collectStructDecls([s.init]); collectStructDecls(s.body); }
+      if (s.type === "SwitchStatement") { for (const c of s.cases) collectStructDecls(c.body); }
     }
   }
   collectStructDecls(func.body);
@@ -838,6 +835,7 @@ function buildFunctionBody(
       if (s.type === "IfStatement") { collectStructPtrTypes(s.consequent); if (s.alternate) collectStructPtrTypes(s.alternate); }
       if (s.type === "WhileStatement") collectStructPtrTypes(s.body);
       if (s.type === "ForStatement") { collectStructPtrTypes([s.init]); collectStructPtrTypes(s.body); }
+      if (s.type === "SwitchStatement") { for (const c of s.cases) collectStructPtrTypes(c.body); }
     }
   }
   collectStructPtrTypes(func.body);
@@ -857,12 +855,13 @@ function buildFunctionBody(
       if (s.type === "IfStatement") { collectPtrTypes(s.consequent); if (s.alternate) collectPtrTypes(s.alternate); }
       if (s.type === "WhileStatement") collectPtrTypes(s.body);
       if (s.type === "ForStatement") { collectPtrTypes([s.init]); collectPtrTypes(s.body); }
+      if (s.type === "SwitchStatement") { for (const c of s.cases) collectPtrTypes(c.body); }
     }
   }
   collectPtrTypes(func.body);
 
   const returnType = typeSpecToCType(func.returnType || "int");
-  const ctx: Ctx = { locals, localTypes, memVars, memVarTypes, arrayVars, structVars, structParamVars, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, varStructPtrTypes, varPtrTypes, returnType };
+  const ctx: Ctx = { locals, localTypes, memVars, memVarTypes, arrayVars, structVars, structParamVars, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, varStructPtrTypes, varPtrTypes, breakDepth: null, continueDepth: null, switchTmpIdx, returnType };
   const instructions: number[] = [];
 
   for (const ap of atParamCopies) {
@@ -947,7 +946,7 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       }
       break;
     case "ExpressionStatement": {
-      const exprType = emitExpression(out, stmt.expression, ctx);
+      emitExpression(out, stmt.expression, ctx);
       if (exprProducesValue(stmt.expression)) {
         out.push(Op.DROP);
       }
@@ -961,13 +960,25 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
         out.push(Op.I64_NE);
       }
       out.push(Op.IF, BLOCK_VOID);
+      // IF adds one nesting level for break/continue depth
+      const oldBreakIf = ctx.breakDepth;
+      const oldContinueIf = ctx.continueDepth;
+      if (ctx.breakDepth !== null) ctx.breakDepth++;
+      if (ctx.continueDepth !== null) ctx.continueDepth++;
       for (const s of stmt.consequent) emitStatement(out, s, ctx);
       if (stmt.alternate) { out.push(Op.ELSE); for (const s of stmt.alternate) emitStatement(out, s, ctx); }
+      ctx.breakDepth = oldBreakIf;
+      ctx.continueDepth = oldContinueIf;
       out.push(Op.END);
       break;
     }
     case "WhileStatement": {
+      // BLOCK (break target) + LOOP (continue target)
       out.push(Op.BLOCK, BLOCK_VOID, Op.LOOP, BLOCK_VOID);
+      const oldBreakW = ctx.breakDepth;
+      const oldContinueW = ctx.continueDepth;
+      ctx.breakDepth = 1;     // BR 1 exits BLOCK
+      ctx.continueDepth = 0;  // BR 0 goes to LOOP start
       const condType = emitExpression(out, stmt.condition, ctx);
       if (condType === "long") {
         out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0));
@@ -975,10 +986,14 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       }
       out.push(Op.I32_EQZ, Op.BR_IF, ...encodeUnsignedLEB128(1));
       for (const s of stmt.body) emitStatement(out, s, ctx);
+      ctx.breakDepth = oldBreakW;
+      ctx.continueDepth = oldContinueW;
       out.push(Op.BR, ...encodeUnsignedLEB128(0), Op.END, Op.END);
       break;
     }
     case "ForStatement": {
+      // For loops need an extra BLOCK for continue so update runs before looping back
+      // Structure: init; BLOCK(break) { LOOP { cond; br_if exit; BLOCK(continue) { body } update; br loop } }
       emitStatement(out, stmt.init, ctx);
       out.push(Op.BLOCK, BLOCK_VOID, Op.LOOP, BLOCK_VOID);
       const condType = emitExpression(out, stmt.condition, ctx);
@@ -987,10 +1002,89 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
         out.push(Op.I64_NE);
       }
       out.push(Op.I32_EQZ, Op.BR_IF, ...encodeUnsignedLEB128(1));
+      // BLOCK for continue target — exiting this block jumps to update
+      out.push(Op.BLOCK, BLOCK_VOID);
+      const oldBreakF = ctx.breakDepth;
+      const oldContinueF = ctx.continueDepth;
+      ctx.breakDepth = 2;     // BR 2 exits outer BLOCK (past continue block + loop)
+      ctx.continueDepth = 0;  // BR 0 exits continue block → runs update
       for (const s of stmt.body) emitStatement(out, s, ctx);
+      ctx.breakDepth = oldBreakF;
+      ctx.continueDepth = oldContinueF;
+      out.push(Op.END); // end continue block
       emitExpression(out, stmt.update, ctx);
       if (exprProducesValue(stmt.update)) out.push(Op.DROP);
       out.push(Op.BR, ...encodeUnsignedLEB128(0), Op.END, Op.END);
+      break;
+    }
+    case "BreakStatement": {
+      if (ctx.breakDepth === null) throw new Error("'break' outside of loop or switch");
+      out.push(Op.BR, ...encodeUnsignedLEB128(ctx.breakDepth));
+      break;
+    }
+    case "ContinueStatement": {
+      if (ctx.continueDepth === null) throw new Error("'continue' outside of loop");
+      out.push(Op.BR, ...encodeUnsignedLEB128(ctx.continueDepth));
+      break;
+    }
+    case "SwitchStatement": {
+      // Switch uses nested blocks:
+      // BLOCK $exit (break target)
+      //   BLOCK $caseN_entry
+      //     ...
+      //     BLOCK $case0_entry
+      //       dispatch: compare and br_if to correct case
+      //     END -> case 0 body (fall-through)
+      //   END -> case 1 body
+      // END -> exit
+
+      const cases = stmt.cases;
+      const numEntries = cases.length; // number of case/default blocks
+
+      // Emit outer break block + case entry blocks
+      out.push(Op.BLOCK, BLOCK_VOID); // $exit
+      for (let i = 0; i < numEntries; i++) {
+        out.push(Op.BLOCK, BLOCK_VOID); // case entry blocks (innermost = first case)
+      }
+
+      // Dispatch: evaluate switch expression, compare with each case
+      emitExpression(out, stmt.discriminant, ctx);
+      out.push(Op.LOCAL_SET, ...encodeUnsignedLEB128(ctx.switchTmpIdx!));
+
+      let defaultIdx = -1;
+      for (let i = 0; i < cases.length; i++) {
+        if (cases[i].value === null) {
+          defaultIdx = i;
+          continue;
+        }
+        out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(ctx.switchTmpIdx!));
+        emitExpression(out, cases[i].value!, ctx);
+        out.push(Op.I32_EQ);
+        out.push(Op.BR_IF, ...encodeUnsignedLEB128(i)); // BR to case i's body
+      }
+      // Default: jump to default case or exit
+      if (defaultIdx >= 0) {
+        out.push(Op.BR, ...encodeUnsignedLEB128(defaultIdx));
+      } else {
+        out.push(Op.BR, ...encodeUnsignedLEB128(numEntries)); // jump to $exit
+      }
+
+      // Emit case bodies
+      const oldBreakS = ctx.breakDepth;
+      const oldContinueS = ctx.continueDepth;
+      for (let i = 0; i < cases.length; i++) {
+        out.push(Op.END); // end case i's entry block
+        // Inside case i body: (numEntries-1-i) remaining entry blocks + $exit block above us
+        ctx.breakDepth = numEntries - 1 - i;
+        // Continue: if inside a loop, adjust for switch blocks still enclosing us
+        if (oldContinueS !== null) {
+          ctx.continueDepth = oldContinueS + numEntries - i; // remaining entry blocks + $exit
+        }
+        for (const s of cases[i].body) emitStatement(out, s, ctx);
+      }
+      ctx.breakDepth = oldBreakS;
+      ctx.continueDepth = oldContinueS;
+      out.push(Op.END); // end $exit block
       break;
     }
   }

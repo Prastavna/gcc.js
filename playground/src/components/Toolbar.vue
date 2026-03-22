@@ -85,6 +85,22 @@ const examples: { label: string; code: string }[] = [
     label: 'Struct pointers',
     code: `struct Point { int x; int y; };\n\nvoid set_point(struct Point *p, int x, int y) {\n    p->x = x;\n    p->y = y;\n}\n\nint main() {\n    struct Point p;\n    set_point(&p, 5, 7);\n    return p.x + p.y;\n}`,
   },
+  {
+    label: 'Dynamic memory',
+    code: `int main() {\n    int *arr = malloc(10 * sizeof(int));\n    for (int i = 0; i < 10; i = i + 1) {\n        arr[i] = i * i;\n    }\n    int sum = 0;\n    for (int i = 0; i < 10; i = i + 1) {\n        sum += arr[i];\n    }\n    free(arr);\n    return sum;\n}`,
+  },
+  {
+    label: 'Switch/case',
+    code: `int classify(int x) {\n    switch (x) {\n        case 0: return 0;\n        case 1: return 1;\n        case 2: return 2;\n        default: return 99;\n    }\n}\n\nint main() {\n    return classify(0) + classify(1) + classify(5);\n}`,
+  },
+  {
+    label: 'Break & continue',
+    code: `int sum_odd(int n) {\n    int sum = 0;\n    for (int i = 0; i < n; i = i + 1) {\n        if (i % 2 == 0) continue;\n        sum = sum + i;\n    }\n    return sum;\n}\n\nint main() {\n    return sum_odd(20);\n}`,
+  },
+  {
+    label: 'Linked list (malloc)',
+    code: `struct Node { int value; int next; };\n\nint main() {\n    int *values = malloc(5 * sizeof(int));\n    for (int i = 0; i < 5; i = i + 1) {\n        values[i] = (i + 1) * 10;\n    }\n    int sum = 0;\n    for (int i = 0; i < 5; i = i + 1) {\n        sum += values[i];\n    }\n    free(values);\n    return sum;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

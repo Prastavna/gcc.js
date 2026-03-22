@@ -527,7 +527,7 @@ describe("lexer", () => {
 
     it("distinguishes -> from -- and -", () => {
       const tokens = tokenize("p->x p-- p-1");
-      const ops = tokens.filter(t => [TokenType.ARROW, TokenType.MINUS_MINUS, TokenType.MINUS].includes(t.type));
+      const ops = tokens.filter(t => ([TokenType.ARROW, TokenType.MINUS_MINUS, TokenType.MINUS] as string[]).includes(t.type));
       expect(ops.map(t => t.type)).toEqual([TokenType.ARROW, TokenType.MINUS_MINUS, TokenType.MINUS]);
     });
 

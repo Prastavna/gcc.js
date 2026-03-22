@@ -13,6 +13,11 @@ const KEYWORDS: Record<string, TokenType> = {
   else: TokenType.ELSE,
   while: TokenType.WHILE,
   for: TokenType.FOR,
+  switch: TokenType.SWITCH,
+  case: TokenType.CASE,
+  default: TokenType.DEFAULT,
+  break: TokenType.BREAK,
+  continue: TokenType.CONTINUE,
 };
 
 const SIMPLE_TOKENS: Record<string, TokenType> = {

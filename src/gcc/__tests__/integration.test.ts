@@ -1739,4 +1739,129 @@ describe("integration: compile() end-to-end", () => {
       expect((instance.exports.main as () => number)()).toBe(8);
     });
   });
+
+  describe("Milestone 11: Dynamic memory (malloc/free)", () => {
+    it("basic malloc + pointer indexing", async () => {
+      const source = `
+        int main() {
+          int *arr = malloc(10 * sizeof(int));
+          arr[0] = 10;
+          arr[1] = 20;
+          arr[2] = 30;
+          return arr[0] + arr[1] + arr[2];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(60);
+    });
+
+    it("malloc + loop to fill array", async () => {
+      const source = `
+        int main() {
+          int *arr = malloc(10 * sizeof(int));
+          for (int i = 0; i < 10; i = i + 1) {
+            arr[i] = i * i;
+          }
+          return arr[5];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(25);
+    });
+
+    it("free is a no-op (does not crash)", async () => {
+      const source = `
+        int main() {
+          int *arr = malloc(5 * sizeof(int));
+          arr[0] = 42;
+          free(arr);
+          return arr[0];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // free is no-op, so arr[0] still readable
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("multiple mallocs return different addresses", async () => {
+      const source = `
+        int main() {
+          int *a = malloc(4 * sizeof(int));
+          int *b = malloc(4 * sizeof(int));
+          a[0] = 111;
+          b[0] = 222;
+          return a[0] + b[0];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(333);
+    });
+
+    it("milestone 11 example: malloc + loop + free + return", async () => {
+      const source = `
+        int main() {
+          int *arr = malloc(10 * sizeof(int));
+          for (int i = 0; i < 10; i = i + 1) {
+            arr[i] = i * i;
+          }
+          free(arr);
+          return arr[5];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(25);
+    });
+
+    it("malloc with char pointer indexing", async () => {
+      const source = `
+        int main() {
+          char *buf = malloc(10);
+          buf[0] = 65;
+          buf[1] = 66;
+          buf[2] = 67;
+          return buf[0] + buf[1] + buf[2];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 65 + 66 + 67 = 198
+      expect((instance.exports.main as () => number)()).toBe(198);
+    });
+
+    it("malloc with struct pointer", async () => {
+      const source = `
+        struct Point { int x; int y; };
+        int main() {
+          struct Point *p = malloc(sizeof(struct Point));
+          p->x = 3;
+          p->y = 4;
+          return p->x * p->x + p->y * p->y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(25);
+    });
+
+    it("malloc in a called function", async () => {
+      const source = `
+        int sum(int n) {
+          int *arr = malloc(n * sizeof(int));
+          for (int i = 0; i < n; i = i + 1) {
+            arr[i] = i + 1;
+          }
+          int total = 0;
+          for (int i = 0; i < n; i = i + 1) {
+            total = total + arr[i];
+          }
+          free(arr);
+          return total;
+        }
+        int main() {
+          return sum(10);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 1+2+3+...+10 = 55
+      expect((instance.exports.main as () => number)()).toBe(55);
+    });
+  });
 });

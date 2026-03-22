@@ -89,6 +89,8 @@ let memoryUsed = false;
 let nextMemAddr = 0;
 let stringData: { addr: number; bytes: number[] }[] = [];
 let structDefs: Map<string, StructDef> = new Map();
+let mallocUsed = false;
+let heapPtrGlobalIdx = 0;
 
 /**
  * Generates a WASM binary module from a Program AST.
@@ -98,6 +100,7 @@ export function generate(ast: Program): Uint8Array {
   nextMemAddr = 0;
   stringData = [];
   structDefs = new Map();
+  mallocUsed = false;
 
   // Separate declarations by kind
   const externs: ExternFunctionDeclaration[] = [];
@@ -217,14 +220,22 @@ export function generate(ast: Program): Uint8Array {
     if (functionUsesMemory(func)) { memoryUsed = true; break; }
   }
 
-  // Build sections (must follow WASM section ordering: 1,2,3,5,6,7,10,11)
+  // Heap pointer global index is after user globals
+  heapPtrGlobalIdx = globals.length;
+
+  // Build code section FIRST — it finalizes nextMemAddr and mallocUsed
+  const codeSection = buildCodeSection(funcs, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams);
+
+  // If malloc was used, we need memory and the heap pointer global
+  if (mallocUsed) memoryUsed = true;
+
+  // Build remaining sections (WASM section ordering: 1,2,3,5,6,7,10,11)
   const typeSection = buildTypeSection(typeSigs);
   const importSection = externs.length > 0 ? buildImportSection(externs, importTypeIndices) : [];
   const funcSection = buildFunctionSection(funcTypeIndices);
   const memorySection = memoryUsed ? buildMemorySection() : [];
-  const globalSection = globals.length > 0 ? buildGlobalSection(globals) : [];
+  const globalSection = (globals.length > 0 || mallocUsed) ? buildGlobalSectionWithHeap(globals, mallocUsed, nextMemAddr) : [];
   const exportSection = buildExportSection(funcs, importCount);
-  const codeSection = buildCodeSection(funcs, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams);
   const dataSection = stringData.length > 0 ? buildDataSection() : [];
 
   const bytes: number[] = [
@@ -349,7 +360,7 @@ function exprUsesMemory(expr: Expression): boolean {
     case "UnaryExpression": return exprUsesMemory(expr.operand);
     case "AssignmentExpression": return exprUsesMemory(expr.value);
     case "CompoundAssignmentExpression": return exprUsesMemory(expr.value);
-    case "CallExpression": return expr.args.some(exprUsesMemory);
+    case "CallExpression": return expr.callee === "malloc" || expr.callee === "free" || expr.args.some(exprUsesMemory);
     case "LogicalExpression": return exprUsesMemory(expr.left) || exprUsesMemory(expr.right);
     case "TernaryExpression": return exprUsesMemory(expr.condition) || exprUsesMemory(expr.consequent) || exprUsesMemory(expr.alternate);
     case "CastExpression": return exprUsesMemory(expr.operand);
@@ -450,9 +461,11 @@ function evalConstExpr(expr: Expression): number | null {
 
 /**
  * Global section: declares mutable globals with constant initializers.
+ * Optionally appends a heap pointer global for malloc support.
  */
-function buildGlobalSection(globals: GlobalVariableDeclaration[]): number[] {
-  const content: number[] = [...encodeUnsignedLEB128(globals.length)];
+function buildGlobalSectionWithHeap(globals: GlobalVariableDeclaration[], includHeapPtr: boolean, heapStart: number): number[] {
+  const count = globals.length + (includHeapPtr ? 1 : 0);
+  const content: number[] = [...encodeUnsignedLEB128(count)];
   for (const g of globals) {
     const ctype = typeSpecToCType(g.typeSpec || "int");
     const wt = wasmTypeFor(ctype);
@@ -463,6 +476,13 @@ function buildGlobalSection(globals: GlobalVariableDeclaration[]): number[] {
     } else {
       content.push(Op.I32_CONST, ...encodeSignedLEB128(val ?? 0), Op.END);
     }
+  }
+  if (includHeapPtr) {
+    // Heap pointer: mutable i32, initialized to first free address after static data
+    // Align heap start to 8 bytes
+    const alignedStart = (heapStart + 7) & ~7;
+    content.push(ValType.I32, 0x01); // mutable i32
+    content.push(Op.I32_CONST, ...encodeSignedLEB128(alignedStart), Op.END);
   }
   return makeSection(Section.GLOBAL, content);
 }
@@ -595,6 +615,7 @@ type Ctx = {
   funcParamTypes: Map<string, CType[]>;
   funcStructParams: Map<string, Map<number, string>>;
   varStructPtrTypes: Map<string, string>; // var name -> struct name for pointer-to-struct vars
+  varPtrTypes: Map<string, CType>; // var name -> pointed-to element type for primitive pointer vars
   returnType: CType;
 };
 
@@ -820,8 +841,28 @@ function buildFunctionBody(
     }
   }
   collectStructPtrTypes(func.body);
+
+  // Track primitive pointer variable types (int *p, char *p, long *p)
+  const varPtrTypes = new Map<string, CType>();
+  for (let i = 0; i < func.params.length; i++) {
+    if (func.params[i].pointer && typeof func.params[i].typeSpec === "string") {
+      varPtrTypes.set(func.params[i].name, func.params[i].typeSpec as CType);
+    }
+  }
+  function collectPtrTypes(stmts: Statement[]): void {
+    for (const s of stmts) {
+      if (s.type === "VariableDeclaration" && s.pointer && typeof s.typeSpec === "string") {
+        varPtrTypes.set(s.name, s.typeSpec as CType);
+      }
+      if (s.type === "IfStatement") { collectPtrTypes(s.consequent); if (s.alternate) collectPtrTypes(s.alternate); }
+      if (s.type === "WhileStatement") collectPtrTypes(s.body);
+      if (s.type === "ForStatement") { collectPtrTypes([s.init]); collectPtrTypes(s.body); }
+    }
+  }
+  collectPtrTypes(func.body);
+
   const returnType = typeSpecToCType(func.returnType || "int");
-  const ctx: Ctx = { locals, localTypes, memVars, memVarTypes, arrayVars, structVars, structParamVars, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, varStructPtrTypes, returnType };
+  const ctx: Ctx = { locals, localTypes, memVars, memVarTypes, arrayVars, structVars, structParamVars, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, varStructPtrTypes, varPtrTypes, returnType };
   const instructions: number[] = [];
 
   for (const ap of atParamCopies) {
@@ -966,6 +1007,9 @@ function exprProducesValue(expr: Expression): boolean {
     case "MemberAssignmentExpression":
     case "ArrowAssignmentExpression":
       return false;
+    case "CallExpression":
+      // Built-in free returns void (no value on stack)
+      return expr.callee !== "free";
     default:
       return true;
   }
@@ -1264,6 +1308,45 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       return "void";
     }
     case "CallExpression": {
+      // Built-in malloc: bump allocator on linear memory
+      if (expr.callee === "malloc") {
+        mallocUsed = true;
+        // Align heap pointer to 8 bytes
+        out.push(Op.GLOBAL_GET, ...encodeUnsignedLEB128(heapPtrGlobalIdx));
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(7));
+        out.push(Op.I32_ADD);
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(-8));
+        out.push(Op.I32_AND);
+        out.push(Op.GLOBAL_SET, ...encodeUnsignedLEB128(heapPtrGlobalIdx));
+        // Save old heap pointer (return value)
+        out.push(Op.GLOBAL_GET, ...encodeUnsignedLEB128(heapPtrGlobalIdx));
+        // Bump: heapPtr += size
+        out.push(Op.GLOBAL_GET, ...encodeUnsignedLEB128(heapPtrGlobalIdx));
+        emitExpression(out, expr.args[0], ctx);
+        out.push(Op.I32_ADD);
+        out.push(Op.GLOBAL_SET, ...encodeUnsignedLEB128(heapPtrGlobalIdx));
+        // Grow memory if needed: if heapPtr > memory.size * 65536
+        out.push(Op.GLOBAL_GET, ...encodeUnsignedLEB128(heapPtrGlobalIdx));
+        out.push(Op.MEMORY_SIZE, 0x00);
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(16));
+        out.push(Op.I32_SHL);
+        out.push(Op.I32_GT_U);
+        out.push(Op.IF, BLOCK_VOID);
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
+        out.push(Op.MEMORY_GROW, 0x00);
+        out.push(Op.DROP);
+        out.push(Op.END);
+        // Stack has old heap pointer as return value
+        return "int";
+      }
+      // Built-in free: no-op (evaluate arg for side effects, drop)
+      if (expr.callee === "free") {
+        if (expr.args.length > 0) {
+          emitExpression(out, expr.args[0], ctx);
+          out.push(Op.DROP);
+        }
+        return "void";
+      }
       const fIdx = ctx.funcIndex.get(expr.callee);
       if (fIdx === undefined) throw new Error(`Unknown function '${expr.callee}'`);
       const paramTypes = ctx.funcParamTypes.get(expr.callee);
@@ -1377,31 +1460,37 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
     }
     case "ArrayAccessExpression": {
       const arrInfo = ctx.arrayVars.get(expr.array);
+      // Determine element type: pointer vars use their pointed-to type, arrays default to int
+      const elemType: CType = ctx.varPtrTypes.get(expr.array) || "int";
+      const elemSize = sizeOfType(elemType);
       if (arrInfo) {
         out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr));
       } else {
         emitVarGet(out, expr.array, ctx);
       }
       emitExpression(out, expr.index, ctx);
-      out.push(Op.I32_CONST, ...encodeSignedLEB128(4));
+      out.push(Op.I32_CONST, ...encodeSignedLEB128(elemSize));
       out.push(Op.I32_MUL);
       out.push(Op.I32_ADD);
-      out.push(Op.I32_LOAD, 0x02, 0x00);
-      return "int";
+      emitMemLoad(out, elemType);
+      return elemType === "long" ? "long" : "int";
     }
     case "ArrayIndexAssignment": {
       const arrInfo = ctx.arrayVars.get(expr.array);
+      const elemType: CType = ctx.varPtrTypes.get(expr.array) || "int";
+      const elemSize = sizeOfType(elemType);
       if (arrInfo) {
         out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr));
       } else {
         emitVarGet(out, expr.array, ctx);
       }
       emitExpression(out, expr.index, ctx);
-      out.push(Op.I32_CONST, ...encodeSignedLEB128(4));
+      out.push(Op.I32_CONST, ...encodeSignedLEB128(elemSize));
       out.push(Op.I32_MUL);
       out.push(Op.I32_ADD);
-      emitExpression(out, expr.value, ctx);
-      out.push(Op.I32_STORE, 0x02, 0x00);
+      const valType = emitExpression(out, expr.value, ctx);
+      emitConversion(out, valType, elemType);
+      emitMemStore(out, elemType);
       return "void";
     }
     case "UpdateExpression": {

@@ -474,7 +474,7 @@ export function parse(tokens: Token[]): Program {
       expect(TokenType.EQUALS, "'=' in variable declaration");
       const initializer = parseExpression();
       expect(TokenType.SEMICOLON, "';' after variable declaration");
-      return { type: "VariableDeclaration", name, typeSpec, initializer };
+      return { type: "VariableDeclaration", name, typeSpec, initializer, pointer: true };
     }
 
     // Pointer variable declaration: int *p = expr;
@@ -490,7 +490,7 @@ export function parse(tokens: Token[]): Program {
       expect(TokenType.EQUALS, "'=' in variable declaration");
       const initializer = parseExpression();
       expect(TokenType.SEMICOLON, "';' after variable declaration");
-      return { type: "VariableDeclaration", name, typeSpec, initializer };
+      return { type: "VariableDeclaration", name, typeSpec, initializer, pointer: true };
     }
 
     // Array declaration: int arr[5]; or int arr[3] = {1, 2, 3};

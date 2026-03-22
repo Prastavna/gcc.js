@@ -294,6 +294,7 @@ export interface VariableDeclaration {
   name: string;
   typeSpec: TypeSpecifier;
   initializer: Expression;
+  pointer?: boolean;
 }
 
 export interface ExpressionStatement {

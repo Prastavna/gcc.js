@@ -119,6 +119,10 @@ export const Op = {
   I32_CONST: 0x41,
   I64_CONST: 0x42,
 
+  // Memory management
+  MEMORY_SIZE: 0x3f,
+  MEMORY_GROW: 0x40,
+
   // Comparison (i32)
   I32_EQZ: 0x45,
   I32_EQ: 0x46,
@@ -147,12 +151,19 @@ export const Op = {
   I64_LOAD: 0x29,
   I64_STORE: 0x37,
 
+  // Unsigned comparison (i32)
+  I32_GT_U: 0x4b,
+
   // Arithmetic (i32)
   I32_ADD: 0x6a,
   I32_SUB: 0x6b,
   I32_MUL: 0x6c,
   I32_DIV_S: 0x6d,
   I32_REM_S: 0x6f,
+
+  // Bitwise (i32)
+  I32_AND: 0x71,
+  I32_SHL: 0x74,
 
   // Arithmetic (i64)
   I64_ADD: 0x7c,

@@ -188,7 +188,7 @@ int main() {
 - [x] `sizeof(struct Point)`
 - [x] Mixed field types (char/int/long with padding)
 
-### Milestone 11: Dynamic memory (malloc/free)
+### Milestone 11: Dynamic memory (malloc/free) [DONE]
 ```c
 int printf(int ptr);
 int main() {
@@ -201,11 +201,11 @@ int main() {
     return arr[5];
 }
 ```
-- Built-in `malloc` (bump allocator on linear memory)
-- Built-in `free` (no-op initially, then freelist)
-- Pointer indexing (`ptr[i]` as sugar for `*(ptr + i * sizeof(T))`)
-- `sizeof` for all types
-- Grow memory via `memory.grow` when needed
+- [x] Built-in `malloc` (bump allocator on linear memory)
+- [x] Built-in `free` (no-op initially, then freelist)
+- [x] Pointer indexing (`ptr[i]` as sugar for `*(ptr + i * sizeof(T))`)
+- [x] `sizeof` for all types
+- [x] Grow memory via `memory.grow` when needed
 
 ### Milestone 12: Global variables and static data [DONE]
 ```c

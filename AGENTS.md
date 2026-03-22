@@ -12,25 +12,27 @@ gcc.js is a client-side C-to-WebAssembly compiler written in pure TypeScript. It
 - **Build:** `bun run build`
 - **Test framework:** Vitest
 
-All tests must pass before any change is considered complete. There are currently 337 tests across 5 test files.
+All tests must pass before any change is considered complete. There are currently 392 tests across 6 test files.
 
 ## Architecture
 
-The compiler is a four-stage pipeline, each stage a pure function:
+The compiler is a five-stage pipeline, each stage a pure function:
 
 ```
-C source string → Lexer → Parser → Codegen → WASM binary (Uint8Array)
+C source string → Preprocessor → Lexer → Parser → Codegen → WASM binary (Uint8Array)
 ```
 
-| Stage   | File              | Input       | Output          |
-|---------|-------------------|-------------|-----------------|
-| Lexer   | `src/gcc/lexer.ts`   | `string`    | `Token[]`       |
-| Parser  | `src/gcc/parser.ts`  | `Token[]`   | `Program` (AST) |
-| Codegen | `src/gcc/codegen.ts` | `Program`   | `Uint8Array`    |
+| Stage        | File                       | Input       | Output          |
+|--------------|----------------------------|-------------|-----------------|
+| Preprocessor | `src/gcc/preprocessor.ts`  | `string`    | `string`        |
+| Lexer        | `src/gcc/lexer.ts`         | `string`    | `Token[]`       |
+| Parser       | `src/gcc/parser.ts`        | `Token[]`   | `Program` (AST) |
+| Codegen      | `src/gcc/codegen.ts`       | `Program`   | `Uint8Array`    |
 
 Supporting files:
 - `src/gcc/types.ts` — Token types, AST node interfaces, TypeSpecifier, compiler result types
 - `src/gcc/wasm.ts` — WASM binary format helpers (LEB128 encoding, opcodes, section builders)
+- `src/gcc/preprocessor.ts` — C preprocessor (#define, #ifdef, #include)
 - `src/gcc/index.ts` — Public API entry point (`compile()` function)
 
 ## Key Design Decisions
@@ -62,6 +64,7 @@ Tests are in `src/gcc/__tests__/`:
 | `parser.test.ts`      | AST generation from token streams                  |
 | `codegen.test.ts`     | WASM binary output from AST                        |
 | `wasm.test.ts`        | LEB128 encoding and WASM helpers                   |
+| `preprocessor.test.ts` | Macro expansion, conditionals, includes            |
 | `integration.test.ts` | End-to-end: C source → compile → instantiate → run |
 
 Integration tests compile C source and run the resulting WASM module, checking return values.
@@ -76,9 +79,9 @@ Integration tests compile C source and run the resulting WASM module, checking r
 
 ## Documentation
 
-- `docs/PLAN.md` — Milestone roadmap with status (Milestones 1-8 done)
+- `docs/PLAN.md` — Milestone roadmap with status (Milestones 1-15 done)
 - `docs/ARCHITECTURE.md` — Compiler internals and design
 - `docs/API.md` — Public API reference and supported C subset
 
-Keep all three docs updated when implementing new features.
+Keep all three docs updated when implementing new features as well as the playground.
 

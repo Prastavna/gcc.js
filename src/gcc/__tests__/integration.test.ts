@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { compile } from "../index.ts";
+import type { PreprocessorOptions } from "../preprocessor.ts";
 
 /**
  * Helper: compile C source and instantiate the WASM module
  */
-async function compileAndInstantiate(source: string): Promise<WebAssembly.Instance> {
-  const result = compile(source);
+async function compileAndInstantiate(source: string, options?: PreprocessorOptions): Promise<WebAssembly.Instance> {
+  const result = compile(source, options);
   if (!result.ok) throw new Error(`compile failed: ${result.errors[0].message}`);
   const module = await WebAssembly.compile(result.wasm.buffer as ArrayBuffer);
   return WebAssembly.instantiate(module);
@@ -2099,6 +2100,134 @@ describe("integration: compile() end-to-end", () => {
       `;
       const instance = await compileAndInstantiate(source);
       expect((instance.exports.main as () => number)()).toBe(25);
+    });
+  });
+
+  // ── Milestone 15: Preprocessor ────────────────────────────
+
+  describe("preprocessor", () => {
+    it("compiles with #define constant", async () => {
+      const source = `
+        #define ANSWER 42
+        int main() { return ANSWER; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("compiles with #define array size", async () => {
+      const source = `
+        #define SIZE 3
+        int main() {
+          int arr[SIZE];
+          arr[0] = 10;
+          arr[1] = 20;
+          arr[2] = 30;
+          return arr[0] + arr[1] + arr[2];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(60);
+    });
+
+    it("compiles with function-like macro", async () => {
+      const source = `
+        #define SQUARE(x) ((x) * (x))
+        int main() { return SQUARE(7); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(49);
+    });
+
+    it("compiles with nested function-like macros", async () => {
+      const source = `
+        #define ADD(a, b) ((a) + (b))
+        #define DOUBLE(x) ADD(x, x)
+        int main() { return DOUBLE(21); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("compiles with #ifdef conditional", async () => {
+      const source = `
+        #define USE_FAST
+        #ifdef USE_FAST
+        int compute() { return 100; }
+        #else
+        int compute() { return 1; }
+        #endif
+        int main() { return compute(); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(100);
+    });
+
+    it("compiles with #ifndef conditional", async () => {
+      const source = `
+        #ifndef DEBUG
+        int mode() { return 0; }
+        #else
+        int mode() { return 1; }
+        #endif
+        int main() { return mode(); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(0);
+    });
+
+    it("compiles with pre-defined macros from options", async () => {
+      const source = `
+        #ifdef DEBUG
+        int main() { return 1; }
+        #else
+        int main() { return 0; }
+        #endif
+      `;
+      const instance = await compileAndInstantiate(source, { defines: { DEBUG: "1" } });
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("compiles with #include from virtual filesystem", async () => {
+      const files = {
+        "math.h": `
+          int square(int x) { return x * x; }
+        `,
+      };
+      const source = `
+        #include "math.h"
+        int main() { return square(6); }
+      `;
+      const instance = await compileAndInstantiate(source, { files });
+      expect((instance.exports.main as () => number)()).toBe(36);
+    });
+
+    it("compiles with MAX/MIN macros", async () => {
+      const source = `
+        #define MAX(a, b) ((a) > (b) ? (a) : (b))
+        #define MIN(a, b) ((a) < (b) ? (a) : (b))
+        int main() { return MAX(10, 20) + MIN(3, 5); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(23);
+    });
+
+    it("compiles with include guard preventing double definition", async () => {
+      const files = {
+        "consts.h": [
+          "#ifndef CONSTS_H",
+          "#define CONSTS_H",
+          "int get_val() { return 42; }",
+          "#endif",
+        ].join("\n"),
+      };
+      const source = `
+        #include "consts.h"
+        #include "consts.h"
+        int main() { return get_val(); }
+      `;
+      const instance = await compileAndInstantiate(source, { files });
+      expect((instance.exports.main as () => number)()).toBe(42);
     });
   });
 });

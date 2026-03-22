@@ -424,7 +424,7 @@ export interface Program {
 // ── Compiler Result Types ────────────────────────────────────
 
 export interface CompileError {
-  stage: "lexer" | "parser" | "codegen";
+  stage: "preprocessor" | "lexer" | "parser" | "codegen";
   message: string;
   line: number;
   col: number;

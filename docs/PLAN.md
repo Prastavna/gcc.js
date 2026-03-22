@@ -264,7 +264,7 @@ int main() {
 - [x] Compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`)
 - [x] Increment/decrement (`++`, `--`)
 
-### Milestone 15: Preprocessor
+### Milestone 15: Preprocessor [DONE]
 ```c
 #define MAX_SIZE 100
 #define SQUARE(x) ((x) * (x))
@@ -275,11 +275,15 @@ int main() {
     return arr[0];
 }
 ```
-- `#define` constants (text substitution)
-- `#define` function-like macros
-- `#ifdef` / `#ifndef` / `#endif`
-- `#include` (virtual in-memory file system)
-- Line/column tracking through macros
+- [x] `#define` constants (text substitution)
+- [x] `#define` function-like macros
+- [x] `#ifdef` / `#ifndef` / `#else` / `#endif`
+- [x] `#include` (virtual in-memory file system)
+- [x] `#undef`
+- [x] Line number preservation (blank lines for directives)
+- [x] Include guards (`#ifndef`/`#define`/`#endif` pattern)
+- [x] Pre-defined macros via options (`defines` parameter)
+- [x] Circular include detection (max depth 16)
 
 ### Milestone 16: Enums, typedefs, and union
 ```c

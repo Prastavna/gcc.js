@@ -6,6 +6,11 @@
 C source string
       │
       ▼
+┌──────────────┐
+│ Preprocessor │  source string → preprocessed string
+└──────────────┘  (#define, #ifdef, #include expansion)
+      │
+      ▼
 ┌──────────┐
 │  Lexer   │  source string → Token[]
 └──────────┘
@@ -27,6 +32,43 @@ C source string
 ```
 
 Each stage is a pure function. No shared mutable state between stages.
+
+---
+
+## Stage 0: Preprocessor (`preprocessor.ts`)
+
+**Input:** `string` (C source code)
+**Output:** `string` (preprocessed source, macros expanded, conditionals resolved)
+
+The preprocessor runs before the lexer as a text transformation pass. It processes the source line by line.
+
+### Directives
+
+| Directive | Purpose |
+|-----------|---------|
+| `#define NAME value` | Object-like macro (text substitution) |
+| `#define NAME(a, b) body` | Function-like macro (parameterized substitution) |
+| `#undef NAME` | Removes a macro definition |
+| `#ifdef NAME` | Include following lines if NAME is defined |
+| `#ifndef NAME` | Include following lines if NAME is NOT defined |
+| `#else` | Alternate branch for `#ifdef`/`#ifndef` |
+| `#endif` | End conditional block |
+| `#include "file"` / `#include <file>` | Include content from virtual filesystem |
+
+### Macro expansion
+
+- Object-like macros: simple text replacement with rescanning for chained macros
+- Function-like macros: argument parsing with nested parenthesis tracking, parameter substitution in body
+- "Blue paint" rule: a macro cannot expand itself (prevents infinite recursion)
+- Identifiers inside string/char literals are not expanded
+
+### Line preservation
+
+Directive lines are replaced with blank lines in the output to preserve line numbers for error reporting.
+
+### Virtual filesystem
+
+`#include` resolves files from the `files` option passed to `compile()` or `preprocess()`. Circular includes are detected with a depth limit of 16.
 
 ---
 

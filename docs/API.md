@@ -10,12 +10,22 @@ No npm package yet. Import directly from source.
 
 ---
 
-## `compile(source: string): CompileResult`
+## `compile(source: string, options?: PreprocessorOptions): CompileResult`
 
-Compiles C source code to a WASM binary module.
+Compiles C source code to a WASM binary module. The source is preprocessed first (macro expansion, conditional compilation, includes).
 
 **Parameters:**
 - `source` — C source code as a string
+- `options` — Optional preprocessor options
+
+```ts
+interface PreprocessorOptions {
+  /** Virtual filesystem for #include: filename → source content */
+  files?: Record<string, string>;
+  /** Pre-defined macros (like -D on the command line) */
+  defines?: Record<string, string>;
+}
+```
 
 **Returns:** `CompileResult`
 
@@ -29,7 +39,8 @@ type CompileResult =
 
 ```ts
 const result = compile(`
-  int main() { return 42; }
+  #define ANSWER 42
+  int main() { return ANSWER; }
 `);
 
 if (result.ok) {
@@ -39,13 +50,25 @@ if (result.ok) {
 }
 ```
 
+**Example with options:**
+
+```ts
+const result = compile(`
+  #include "math.h"
+  int main() { return square(6); }
+`, {
+  files: { "math.h": "int square(int x) { return x * x; }" },
+  defines: { DEBUG: "1" },
+});
+```
+
 ---
 
 ## `CompileError`
 
 ```ts
 interface CompileError {
-  stage: "lexer" | "parser" | "codegen";
+  stage: "preprocessor" | "lexer" | "parser" | "codegen";
   message: string;
   line: number;
   col: number;
@@ -77,6 +100,17 @@ const result = compile(`int main() { return; }`);
 ## Lower-level APIs
 
 These are exported for testing and advanced usage. Not part of the stable API.
+
+### `preprocess(source: string, options?: PreprocessorOptions): string`
+
+Preprocesses C source: expands macros, evaluates conditionals, inlines `#include` files.
+
+```ts
+import { preprocess } from "./gcc/preprocessor";
+
+const result = preprocess("#define X 42\nreturn X;");
+// "return 42;"
+```
 
 ### `tokenize(source: string): Token[]`
 
@@ -117,7 +151,7 @@ const wasmBytes = generate(ast);
 
 ---
 
-## Supported C Subset (through Milestone 8)
+## Supported C Subset (through Milestone 15)
 
 ### Types
 - `int` (32-bit signed), `char` (8-bit signed), `long` (64-bit signed), `void`
@@ -154,5 +188,13 @@ const wasmBytes = generate(ast);
 - `if (cond) { ... } else { ... }`
 - `while (cond) { ... }`
 - `for (init; cond; update) { ... }`
+
+### Preprocessor
+- `#define NAME value` — object-like macro
+- `#define NAME(a, b) body` — function-like macro
+- `#undef NAME`
+- `#ifdef NAME` / `#ifndef NAME` / `#else` / `#endif`
+- `#include "file"` / `#include <file>` (virtual filesystem)
+- Include guards
 
 See [PLAN.md](./PLAN.md) for the full roadmap.

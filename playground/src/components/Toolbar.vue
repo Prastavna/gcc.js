@@ -101,6 +101,18 @@ const examples: { label: string; code: string }[] = [
     label: 'Linked list (malloc)',
     code: `struct Node { int value; int next; };\n\nint main() {\n    int *values = malloc(5 * sizeof(int));\n    for (int i = 0; i < 5; i = i + 1) {\n        values[i] = (i + 1) * 10;\n    }\n    int sum = 0;\n    for (int i = 0; i < 5; i = i + 1) {\n        sum += values[i];\n    }\n    free(values);\n    return sum;\n}`,
   },
+  {
+    label: '#define constants',
+    code: `#define WIDTH 10\n#define HEIGHT 5\n#define AREA(w, h) ((w) * (h))\n\nint main() {\n    return AREA(WIDTH, HEIGHT);\n}`,
+  },
+  {
+    label: '#ifdef conditional',
+    code: `#define USE_FAST\n\n#ifdef USE_FAST\nint compute(int x) {\n    return x * x;\n}\n#else\nint compute(int x) {\n    int result = 0;\n    for (int i = 0; i < x; i++) {\n        result += x;\n    }\n    return result;\n}\n#endif\n\nint main() {\n    return compute(7);\n}`,
+  },
+  {
+    label: 'MAX/MIN macros',
+    code: `#define MAX(a, b) ((a) > (b) ? (a) : (b))\n#define MIN(a, b) ((a) < (b) ? (a) : (b))\n#define CLAMP(x, lo, hi) MIN(MAX(x, lo), hi)\n\nint main() {\n    int val = 150;\n    return CLAMP(val, 0, 100);\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

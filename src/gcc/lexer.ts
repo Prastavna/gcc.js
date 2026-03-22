@@ -18,6 +18,10 @@ const KEYWORDS: Record<string, TokenType> = {
   default: TokenType.DEFAULT,
   break: TokenType.BREAK,
   continue: TokenType.CONTINUE,
+  enum: TokenType.ENUM,
+  typedef: TokenType.TYPEDEF,
+  union: TokenType.UNION,
+  unsigned: TokenType.UNSIGNED,
 };
 
 const SIMPLE_TOKENS: Record<string, TokenType> = {
@@ -175,6 +179,18 @@ export function tokenize(source: string): Token[] {
       tokens.push({ type: TokenType.PIPE_PIPE, value: "||", line, col });
       pos += 2; col += 2; continue;
     }
+    if (ch === "|") {
+      tokens.push({ type: TokenType.PIPE, value: "|", line, col });
+      pos++; col++; continue;
+    }
+    if (ch === "^") {
+      tokens.push({ type: TokenType.CARET, value: "^", line, col });
+      pos++; col++; continue;
+    }
+    if (ch === "~") {
+      tokens.push({ type: TokenType.TILDE, value: "~", line, col });
+      pos++; col++; continue;
+    }
     if (ch === "+" && peekChar() === "+") {
       tokens.push({ type: TokenType.PLUS_PLUS, value: "++", line, col });
       pos += 2; col += 2; continue;
@@ -205,6 +221,14 @@ export function tokenize(source: string): Token[] {
     }
     if (ch === "%" && peekChar() === "=") {
       tokens.push({ type: TokenType.PERCENT_EQUALS, value: "%=", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === "<" && peekChar() === "<") {
+      tokens.push({ type: TokenType.LEFT_SHIFT, value: "<<", line, col });
+      pos += 2; col += 2; continue;
+    }
+    if (ch === ">" && peekChar() === ">") {
+      tokens.push({ type: TokenType.RIGHT_SHIFT, value: ">>", line, col });
       pos += 2; col += 2; continue;
     }
     if (ch === "<" && peekChar() === "=") {

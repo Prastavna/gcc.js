@@ -1,4 +1,4 @@
-import type { Program, FunctionDeclaration, ExternFunctionDeclaration, GlobalVariableDeclaration, StructDeclaration, Statement, Expression, TypeSpecifier } from "./types.ts";
+import type { Program, FunctionDeclaration, ExternFunctionDeclaration, GlobalVariableDeclaration, StructDeclaration, UnionDeclaration, Statement, Expression, TypeSpecifier } from "./types.ts";
 import {
   WASM_MAGIC,
   WASM_VERSION,
@@ -19,7 +19,11 @@ import {
 
 // ── C type helpers ──────────────────────────────────────────
 
-type CType = "char" | "int" | "long" | "void";
+type CType = "char" | "int" | "long" | "void" | "uchar" | "uint";
+
+function isUnsigned(ctype: CType): boolean {
+  return ctype === "uchar" || ctype === "uint";
+}
 
 function wasmTypeFor(ctype: CType): number {
   return ctype === "long" ? ValType.I64 : ValType.I32;
@@ -31,16 +35,17 @@ function blockTypeFor(ctype: CType): number {
 
 function sizeOfType(ctype: CType): number {
   switch (ctype) {
-    case "char": return 1;
-    case "int": return 4;
+    case "char": case "uchar": return 1;
+    case "int": case "uint": return 4;
     case "long": return 8;
     case "void": return 0;
   }
 }
 
-/** Promote: char < int < long. Returns the wider type. */
+/** Promote: char < int < long. Returns the wider type. Unsigned wins if either is unsigned. */
 function promoteTypes(a: CType, b: CType): CType {
   if (a === "long" || b === "long") return "long";
+  if (isUnsigned(a) || isUnsigned(b)) return "uint";
   return "int"; // char promotes to int
 }
 
@@ -61,8 +66,10 @@ type StructFieldInfo = { name: string; ctype: CType; offset: number };
 type StructDef = { name: string; fields: StructFieldInfo[]; size: number };
 
 function typeSpecToCType(ts: TypeSpecifier): CType {
+  if (ts === "unsigned int") return "uint";
+  if (ts === "unsigned char") return "uchar";
   if (typeof ts === "string") return ts as CType;
-  // struct type specifier used as pointer type → i32
+  // struct/union type specifier used as pointer type → i32
   return "int";
 }
 
@@ -81,6 +88,18 @@ function computeStructLayout(decl: StructDeclaration): StructDef {
   const maxAlign = Math.max(...fields.map(f => sizeOfType(f.ctype)), 1);
   while (offset % maxAlign !== 0) offset++;
   return { name: decl.name, fields, size: offset };
+}
+
+function computeUnionLayout(decl: UnionDeclaration): StructDef {
+  const fields: StructFieldInfo[] = [];
+  let maxSize = 0;
+  for (const f of decl.fields) {
+    const ctype = typeSpecToCType(f.typeSpec);
+    const size = sizeOfType(ctype);
+    fields.push({ name: f.name, ctype, offset: 0 }); // all at offset 0
+    maxSize = Math.max(maxSize, size);
+  }
+  return { name: decl.name, fields, size: maxSize };
 }
 
 // ── Module-level state (reset per generate() call) ───────
@@ -107,16 +126,24 @@ export function generate(ast: Program): Uint8Array {
   const funcs: FunctionDeclaration[] = [];
   const globals: GlobalVariableDeclaration[] = [];
   const structs: StructDeclaration[] = [];
+  const unions: UnionDeclaration[] = [];
   for (const d of ast.declarations) {
     if (d.type === "ExternFunctionDeclaration") externs.push(d);
     else if (d.type === "FunctionDeclaration") funcs.push(d);
     else if (d.type === "GlobalVariableDeclaration") globals.push(d);
     else if (d.type === "StructDeclaration") structs.push(d);
+    else if (d.type === "UnionDeclaration") unions.push(d);
+    // EnumDeclaration — no codegen needed (constants resolved at parse time)
   }
 
   // Build struct layout registry
   for (const s of structs) {
     structDefs.set(s.name, computeStructLayout(s));
+  }
+
+  // Build union layout registry (all fields at offset 0, size = max field size)
+  for (const u of unions) {
+    structDefs.set(u.name, computeUnionLayout(u));
   }
 
   // Build global variable name -> WASM global index map + types
@@ -438,6 +465,10 @@ function evalConstExpr(expr: Expression): number | null {
         const v = evalConstExpr(expr.operand);
         return v !== null ? (v === 0 ? 1 : 0) : null;
       }
+      if (expr.operator === "~") {
+        const v = evalConstExpr(expr.operand);
+        return v !== null ? ~v : null;
+      }
       return null;
     case "BinaryExpression": {
       const l = evalConstExpr(expr.left);
@@ -455,15 +486,20 @@ function evalConstExpr(expr: Expression): number | null {
         case ">": return l > r ? 1 : 0;
         case "<=": return l <= r ? 1 : 0;
         case ">=": return l >= r ? 1 : 0;
+        case "&": return (l & r) | 0;
+        case "|": return (l | r) | 0;
+        case "^": return (l ^ r) | 0;
+        case "<<": return (l << r) | 0;
+        case ">>": return (l >> r) | 0;
         default: return null;
       }
     }
     case "SizeofExpression":
-      if (typeof expr.targetType === "object" && expr.targetType.kind === "struct") {
+      if (typeof expr.targetType === "object" && (expr.targetType.kind === "struct" || expr.targetType.kind === "union")) {
         const def = structDefs.get(expr.targetType.name);
         return def ? def.size : null;
       }
-      return sizeOfType(expr.targetType as CType);
+      return sizeOfType(typeSpecToCType(expr.targetType));
     default:
       return null;
   }
@@ -1128,8 +1164,9 @@ function inferType(expr: Expression, ctx: Ctx): CType {
     }
     case "UnaryExpression":
       if (expr.operator === "!") return "int";
+      if (expr.operator === "~") return inferType(expr.operand, ctx);
       return inferType(expr.operand, ctx);
-    case "CastExpression": return expr.targetType as CType;
+    case "CastExpression": return typeSpecToCType(expr.targetType);
     case "CallExpression": return ctx.funcReturnTypes.get(expr.callee) || "int";
     case "AssignmentExpression": return getVarType(expr.name, ctx);
     case "CompoundAssignmentExpression": return getVarType(expr.name, ctx);
@@ -1159,13 +1196,13 @@ function getVarType(name: string, ctx: Ctx): CType {
 
 function emitMemLoad(out: number[], ctype: CType): void {
   switch (ctype) {
-    case "char":
+    case "char": case "uchar":
       out.push(Op.I32_LOAD8_S, 0x00, 0x00);
       break;
     case "long":
       out.push(Op.I64_LOAD, 0x03, 0x00);
       break;
-    default: // int
+    default: // int, uint
       out.push(Op.I32_LOAD, 0x02, 0x00);
       break;
   }
@@ -1173,13 +1210,13 @@ function emitMemLoad(out: number[], ctype: CType): void {
 
 function emitMemStore(out: number[], ctype: CType): void {
   switch (ctype) {
-    case "char":
+    case "char": case "uchar":
       out.push(Op.I32_STORE8, 0x00, 0x00);
       break;
     case "long":
       out.push(Op.I64_STORE, 0x03, 0x00);
       break;
-    default: // int
+    default: // int, uint
       out.push(Op.I32_STORE, 0x02, 0x00);
       break;
   }
@@ -1226,11 +1263,19 @@ function resolveArrowField(pointerName: string, memberName: string, ctx: Ctx): S
 const BINOP_MAP: Record<string, number> = {
   "+": Op.I32_ADD, "-": Op.I32_SUB, "*": Op.I32_MUL, "/": Op.I32_DIV_S, "%": Op.I32_REM_S,
   "==": Op.I32_EQ, "!=": Op.I32_NE, "<": Op.I32_LT_S, ">": Op.I32_GT_S, "<=": Op.I32_LE_S, ">=": Op.I32_GE_S,
+  "&": Op.I32_AND, "|": Op.I32_OR, "^": Op.I32_XOR, "<<": Op.I32_SHL, ">>": Op.I32_SHR_S,
+};
+
+const BINOP_MAP_U32: Record<string, number> = {
+  "/": Op.I32_DIV_U, "%": Op.I32_REM_U,
+  "<": Op.I32_LT_U, ">": Op.I32_GT_U, "<=": Op.I32_LE_U, ">=": Op.I32_GE_U,
+  ">>": Op.I32_SHR_U,
 };
 
 const BINOP_MAP_I64: Record<string, number> = {
   "+": Op.I64_ADD, "-": Op.I64_SUB, "*": Op.I64_MUL, "/": Op.I64_DIV_S, "%": Op.I64_REM_S,
   "==": Op.I64_EQ, "!=": Op.I64_NE, "<": Op.I64_LT_S, ">": Op.I64_GT_S, "<=": Op.I64_LE_S, ">=": Op.I64_GE_S,
+  "&": Op.I64_AND, "|": Op.I64_OR, "^": Op.I64_XOR, "<<": Op.I64_SHL, ">>": Op.I64_SHR_S,
 };
 
 const COMPOUND_OP_MAP: Record<string, number> = {
@@ -1279,12 +1324,12 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       return "int";
     case "SizeofExpression": {
       let sz: number;
-      if (typeof expr.targetType === "object" && expr.targetType.kind === "struct") {
+      if (typeof expr.targetType === "object" && (expr.targetType.kind === "struct" || expr.targetType.kind === "union")) {
         const def = structDefs.get(expr.targetType.name);
-        if (!def) throw new Error(`Unknown struct type '${expr.targetType.name}'`);
+        if (!def) throw new Error(`Unknown ${expr.targetType.kind} type '${expr.targetType.name}'`);
         sz = def.size;
       } else {
-        sz = sizeOfType(expr.targetType as CType);
+        sz = sizeOfType(typeSpecToCType(expr.targetType));
       }
       out.push(Op.I32_CONST, ...encodeSignedLEB128(sz));
       return "int";
@@ -1299,6 +1344,7 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       const leftType = inferType(expr.left, ctx);
       const rightType = inferType(expr.right, ctx);
       const isComparison = ["==", "!=", "<", ">", "<=", ">="].includes(expr.operator);
+      const isBitwise = ["&", "|", "^", "<<", ">>"].includes(expr.operator);
       const opType = promoteTypes(leftType, rightType);
 
       const lt = emitExpression(out, expr.left, ctx);
@@ -1308,11 +1354,15 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
 
       if (opType === "long") {
         out.push(BINOP_MAP_I64[expr.operator]);
+      } else if (isUnsigned(opType) && BINOP_MAP_U32[expr.operator] !== undefined) {
+        out.push(BINOP_MAP_U32[expr.operator]);
       } else {
         out.push(BINOP_MAP[expr.operator]);
       }
       // Comparisons always return i32
-      return isComparison ? "int" : opType;
+      if (isComparison) return "int";
+      if (isBitwise) return opType;
+      return opType;
     }
     case "UnaryExpression":
       if (expr.operator === "-") {
@@ -1336,11 +1386,22 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
           out.push(Op.I32_EQZ);
         }
         return "int";
+      } else if (expr.operator === "~") {
+        const ot = emitExpression(out, expr.operand, ctx);
+        if (ot === "long") {
+          out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(-1));
+          out.push(Op.I64_XOR);
+          return "long";
+        } else {
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(-1));
+          out.push(Op.I32_XOR);
+          return ot;
+        }
       }
       return "int";
     case "CastExpression": {
       const srcType = emitExpression(out, expr.operand, ctx);
-      const targetType = expr.targetType as CType;
+      const targetType = typeSpecToCType(expr.targetType);
       emitConversion(out, srcType, targetType);
       return targetType;
     }

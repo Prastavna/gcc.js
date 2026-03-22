@@ -2230,4 +2230,270 @@ describe("integration: compile() end-to-end", () => {
       expect((instance.exports.main as () => number)()).toBe(42);
     });
   });
+
+  // ── Milestone 16: Enums, typedefs, union, unsigned, bitwise ──
+
+  describe("bitwise operators", () => {
+    it("bitwise AND", async () => {
+      const instance = await compileAndInstantiate("int main() { return 5 & 3; }");
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("bitwise OR", async () => {
+      const instance = await compileAndInstantiate("int main() { return 5 | 3; }");
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+
+    it("bitwise XOR", async () => {
+      const instance = await compileAndInstantiate("int main() { return 5 ^ 3; }");
+      expect((instance.exports.main as () => number)()).toBe(6);
+    });
+
+    it("bitwise NOT", async () => {
+      const instance = await compileAndInstantiate("int main() { return ~0; }");
+      expect((instance.exports.main as () => number)()).toBe(-1);
+    });
+
+    it("left shift", async () => {
+      const instance = await compileAndInstantiate("int main() { return 1 << 3; }");
+      expect((instance.exports.main as () => number)()).toBe(8);
+    });
+
+    it("right shift", async () => {
+      const instance = await compileAndInstantiate("int main() { return 8 >> 2; }");
+      expect((instance.exports.main as () => number)()).toBe(2);
+    });
+
+    it("combined bitwise operations", async () => {
+      const source = `
+        int main() {
+          int flags = 0;
+          flags = flags | 1;    // set bit 0
+          flags = flags | 4;    // set bit 2
+          flags = flags & ~1;   // clear bit 0
+          return flags;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(4);
+    });
+
+    it("bitwise precedence: & binds tighter than |", async () => {
+      const instance = await compileAndInstantiate("int main() { return 1 | 2 & 3; }");
+      // 2 & 3 = 2, 1 | 2 = 3
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+
+    it("bitwise precedence: ^ between & and |", async () => {
+      const instance = await compileAndInstantiate("int main() { return 7 & 6 ^ 3 | 4; }");
+      // 7 & 6 = 6, 6 ^ 3 = 5, 5 | 4 = 5
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("shift in expression with addition", async () => {
+      const instance = await compileAndInstantiate("int main() { return (1 << 4) + 3; }");
+      expect((instance.exports.main as () => number)()).toBe(19);
+    });
+  });
+
+  describe("enum declarations", () => {
+    it("basic enum values", async () => {
+      const source = `
+        enum Color { RED, GREEN, BLUE };
+        int main() { return GREEN; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("enum with explicit values", async () => {
+      const source = `
+        enum Status { OK = 0, ERROR = 42, FATAL = 99 };
+        int main() { return ERROR; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("enum auto-increment after explicit value", async () => {
+      const source = `
+        enum Nums { A = 10, B, C };
+        int main() { return C; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(12);
+    });
+
+    it("anonymous enum", async () => {
+      const source = `
+        enum { X = 5, Y, Z };
+        int main() { return Y + Z; }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(13); // 6 + 7
+    });
+
+    it("enum used in switch", async () => {
+      const source = `
+        enum Color { RED, GREEN, BLUE };
+        int describe(int c) {
+          switch (c) {
+            case RED: return 0;
+            case GREEN: return 1;
+            case BLUE: return 2;
+            default: return 99;
+          }
+        }
+        int main() { return describe(BLUE); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(2);
+    });
+
+    it("enum used as variable type", async () => {
+      const source = `
+        enum Color { RED, GREEN, BLUE };
+        int main() {
+          enum Color c = BLUE;
+          return c;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(2);
+    });
+  });
+
+  describe("typedef", () => {
+    it("simple typedef alias", async () => {
+      const source = `
+        typedef int myint;
+        myint main() {
+          myint x = 42;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("typedef for char", async () => {
+      const source = `
+        typedef char byte;
+        int main() {
+          byte b = 65;
+          return b;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(65);
+    });
+
+    it("typedef with function parameter", async () => {
+      const source = `
+        typedef int num;
+        num square(num x) { return x * x; }
+        int main() { return square(7); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(49);
+    });
+
+    it("typedef for unsigned int", async () => {
+      const source = `
+        typedef unsigned int uint;
+        int main() {
+          uint x = 42;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+  });
+
+  describe("unsigned integer type", () => {
+    it("unsigned int variable", async () => {
+      const source = `
+        int main() {
+          unsigned int x = 42;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("unsigned as shorthand for unsigned int", async () => {
+      const source = `
+        int main() {
+          unsigned x = 100;
+          return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(100);
+    });
+
+    it("unsigned char", async () => {
+      const source = `
+        int main() {
+          unsigned char c = 200;
+          return c;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(200);
+    });
+
+    it("cast to unsigned int", async () => {
+      const source = `
+        int main() {
+          int x = 42;
+          return (unsigned int)x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+  });
+
+  describe("union", () => {
+    it("basic union with member access", async () => {
+      const source = `
+        union Value { int i; char c; };
+        int main() {
+          union Value v;
+          v.i = 42;
+          return v.i;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("union sizeof is max field size", async () => {
+      const source = `
+        union Data { int i; char c; long l; };
+        int main() {
+          return sizeof(union Data);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(8);
+    });
+
+    it("union fields share memory (overlapping)", async () => {
+      const source = `
+        union Value { int i; char c; };
+        int main() {
+          union Value v;
+          v.i = 65;
+          return v.c;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // char reads the low byte of the int — 65 fits in one byte
+      expect((instance.exports.main as () => number)()).toBe(65);
+    });
+  });
 });

@@ -151,13 +151,17 @@ const wasmBytes = generate(ast);
 
 ---
 
-## Supported C Subset (through Milestone 15)
+## Supported C Subset (through Milestone 16)
 
 ### Types
 - `int` (32-bit signed), `char` (8-bit signed), `long` (64-bit signed), `void`
-- Type casting: `(int)expr`, `(char)expr`, `(long)expr`
-- `sizeof(type)` — compile-time constant (char=1, int=4, long=8)
-- Implicit promotion in mixed expressions (int+long → long)
+- `unsigned int`, `unsigned char`
+- `enum` declarations with auto-increment and explicit values
+- `typedef` type aliases
+- `union` (overlapping memory layout)
+- Type casting: `(int)expr`, `(char)expr`, `(long)expr`, `(unsigned int)expr`
+- `sizeof(type)` — compile-time constant (char=1, int=4, long=8, union=max field)
+- Implicit promotion in mixed expressions (int+long → long, signed+unsigned → unsigned)
 
 ### Literals
 - Integer: `42`, `0`, `-1`
@@ -174,6 +178,7 @@ const wasmBytes = generate(ast);
 
 ### Expressions
 - Arithmetic: `+`, `-`, `*`, `/`, `%`
+- Bitwise: `&`, `|`, `^`, `~`, `<<`, `>>`
 - Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
 - Logical: `&&`, `||`, `!`
 - Ternary: `a ? b : c`

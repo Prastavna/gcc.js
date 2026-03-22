@@ -152,7 +152,10 @@ export const Op = {
   I64_STORE: 0x37,
 
   // Unsigned comparison (i32)
+  I32_LT_U: 0x49,
   I32_GT_U: 0x4b,
+  I32_LE_U: 0x4d,
+  I32_GE_U: 0x4f,
 
   // Arithmetic (i32)
   I32_ADD: 0x6a,
@@ -161,9 +164,17 @@ export const Op = {
   I32_DIV_S: 0x6d,
   I32_REM_S: 0x6f,
 
+  // Unsigned arithmetic (i32)
+  I32_DIV_U: 0x6e,
+  I32_REM_U: 0x70,
+
   // Bitwise (i32)
   I32_AND: 0x71,
+  I32_OR: 0x72,
+  I32_XOR: 0x73,
   I32_SHL: 0x74,
+  I32_SHR_S: 0x75,
+  I32_SHR_U: 0x76,
 
   // Arithmetic (i64)
   I64_ADD: 0x7c,
@@ -171,6 +182,14 @@ export const Op = {
   I64_MUL: 0x7e,
   I64_DIV_S: 0x7f,
   I64_REM_S: 0x81,
+
+  // Bitwise (i64)
+  I64_AND: 0x83,
+  I64_OR: 0x84,
+  I64_XOR: 0x85,
+  I64_SHL: 0x86,
+  I64_SHR_S: 0x87,
+  I64_SHR_U: 0x88,
 
   // Conversions
   I32_WRAP_I64: 0xa7,

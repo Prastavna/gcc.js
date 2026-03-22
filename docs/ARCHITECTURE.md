@@ -83,10 +83,11 @@ The lexer scans the source character-by-character and produces a flat array of t
 
 | Category    | Tokens |
 |-------------|--------|
-| Keywords    | `int`, `void`, `char`, `long`, `sizeof`, `return`, `if`, `else`, `while`, `for` |
+| Keywords    | `int`, `void`, `char`, `long`, `unsigned`, `sizeof`, `return`, `if`, `else`, `while`, `for`, `enum`, `typedef`, `union` |
 | Literals    | integer (`42`), string (`"hello\n"`), char (`'A'`), identifiers (`main`) |
 | Operators   | `+`, `-`, `*`, `/`, `%`, `=` |
 | Comparison  | `==`, `!=`, `<`, `>`, `<=`, `>=` |
+| Bitwise     | `&`, `\|`, `^`, `~`, `<<`, `>>` |
 | Pointer     | `&` |
 | Punctuation | `(`, `)`, `{`, `}`, `;`, `,` |
 
@@ -183,9 +184,11 @@ Variables are analyzed per-function:
 
 | C type | WASM local type | Memory ops | sizeof |
 |--------|----------------|------------|--------|
-| `char` | i32 | `i32.load8_s` / `i32.store8` | 1 |
-| `int`  | i32 | `i32.load` / `i32.store` | 4 |
+| `char` / `unsigned char` | i32 | `i32.load8_s` / `i32.store8` | 1 |
+| `int` / `unsigned int` | i32 | `i32.load` / `i32.store` | 4 |
 | `long` | i64 | `i64.load` / `i64.store` | 8 |
+
+Unsigned types use unsigned opcodes for division (`div_u`), remainder (`rem_u`), comparison (`lt_u`, `gt_u`, etc.), and right shift (`shr_u`).
 
 **Type tracking:** The codegen maintains type maps (`localTypes`, `memVarTypes`, `globalTypes`, `funcReturnTypes`, `funcParamTypes`) to determine correct opcodes and conversions.
 

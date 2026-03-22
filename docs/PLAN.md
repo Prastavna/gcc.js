@@ -285,7 +285,7 @@ int main() {
 - [x] Pre-defined macros via options (`defines` parameter)
 - [x] Circular include detection (max depth 16)
 
-### Milestone 16: Enums, typedefs, and union
+### Milestone 16: Enums, typedefs, and union [DONE]
 ```c
 typedef unsigned int uint;
 enum Color { RED, GREEN, BLUE };
@@ -299,11 +299,11 @@ int main() {
     return c + x;
 }
 ```
-- `enum` declarations (integer constants)
-- `typedef` (type aliases)
-- `union` (overlapping memory layout)
-- `unsigned` integer type
-- Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`)
+- [x] `enum` declarations (integer constants, auto-increment, explicit values)
+- [x] `typedef` (type aliases for all types including unsigned and struct)
+- [x] `union` (overlapping memory layout, sizeof = max field)
+- [x] `unsigned int` and `unsigned char` types
+- [x] Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`)
 
 ### Milestone 17: Complete program target
 ```c

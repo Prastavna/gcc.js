@@ -12,7 +12,7 @@ gcc.js is a client-side C-to-WebAssembly compiler written in pure TypeScript. It
 - **Build:** `bun run build`
 - **Test framework:** Vitest
 
-All tests must pass before any change is considered complete. There are currently 392 tests across 6 test files.
+All tests must pass before any change is considered complete. There are currently 419 tests across 6 test files.
 
 ## Architecture
 
@@ -48,11 +48,11 @@ Supporting files:
 
 | C type | WASM type | Memory ops                      | sizeof |
 |--------|-----------|----------------------------------|--------|
-| `char` | i32       | `i32.load8_s` / `i32.store8`    | 1      |
-| `int`  | i32       | `i32.load` / `i32.store`        | 4      |
+| `char` / `unsigned char` | i32 | `i32.load8_s` / `i32.store8` | 1 |
+| `int` / `unsigned int`   | i32 | `i32.load` / `i32.store`     | 4 |
 | `long` | i64       | `i64.load` / `i64.store`        | 8      |
 
-Implicit promotion rule: in binary ops, both operands promote to the wider type (char < int < long). Comparisons always return int.
+Implicit promotion rule: in binary ops, both operands promote to the wider type (char < int < long). Unsigned types use unsigned opcodes (div_u, shr_u, lt_u, etc.). Comparisons always return int.
 
 ## Test Structure
 
@@ -79,7 +79,7 @@ Integration tests compile C source and run the resulting WASM module, checking r
 
 ## Documentation
 
-- `docs/PLAN.md` — Milestone roadmap with status (Milestones 1-15 done)
+- `docs/PLAN.md` — Milestone roadmap with status (Milestones 1-16 done)
 - `docs/ARCHITECTURE.md` — Compiler internals and design
 - `docs/API.md` — Public API reference and supported C subset
 

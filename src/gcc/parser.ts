@@ -16,46 +16,16 @@ import type {
 /**
  * Recursive descent parser with precedence climbing for expressions.
  *
- * Grammar (Phase 2 — Milestone 8):
- *   program        → declaration*
- *   declaration    → extern_decl | function_decl
- *   extern_decl    → type_spec IDENTIFIER '(' param_list? ')' ';'
- *   function_decl  → type_spec IDENTIFIER '(' param_list? ')' '{' statement* '}'
- *   param_list     → param (',' param)*
- *   param          → type_spec '*'? IDENTIFIER
- *   type_spec      → 'int' | 'void'
- *
- *   statement      → var_decl | return_stmt | if_stmt | while_stmt | for_stmt
- *                  | block | expr_stmt
- *   var_decl       → type_spec '*'? IDENTIFIER '=' expression ';'
- *   return_stmt    → 'return' expression ';'
- *   if_stmt        → 'if' '(' expression ')' block_or_stmt ('else' block_or_stmt)?
- *   while_stmt     → 'while' '(' expression ')' block_or_stmt
- *   for_stmt       → 'for' '(' (var_decl | expr_stmt) expression ';' expression ')' block_or_stmt
- *   block_or_stmt  → '{' statement* '}' | statement
- *   expr_stmt      → expression ';'
- *
- *   expression     → assignment
- *   assignment     → '*' unary '=' assignment
- *                  | IDENTIFIER '=' assignment
- *                  | IDENTIFIER compound_op assignment
- *                  | ternary
- *   compound_op    → '+=' | '-=' | '*=' | '/=' | '%='
- *   ternary        → logical_or ('?' expression ':' ternary)?
- *   logical_or     → logical_and ('||' logical_and)*
- *   logical_and    → comparison ('&&' comparison)*
- *   comparison     → additive (('==' | '!=' | '<' | '>' | '<=' | '>=') additive)*
- *   additive       → multiplicative (('+' | '-') multiplicative)*
- *   multiplicative → unary (('*' | '/' | '%') unary)*
- *   unary          → '-' unary | '!' unary | '*' unary | '&' IDENTIFIER
- *                  | '++' IDENTIFIER | '--' IDENTIFIER | postfix
- *   postfix        → primary ('++'  | '--')*
- *   primary        → NUMBER | STRING | IDENTIFIER '(' arg_list? ')' | IDENTIFIER
- *                  | '(' expression ')'
- *   arg_list       → expression (',' expression)*
+ * Precedence (low to high):
+ *   assignment → ternary → logical_or → logical_and → bitwise_or → bitwise_xor
+ *   → bitwise_and → comparison → shift → additive → multiplicative → unary → postfix → primary
  */
 export function parse(tokens: Token[]): Program {
   let pos = 0;
+
+  // Maps for compile-time constant resolution
+  const enumConstants = new Map<string, number>();
+  const typedefs = new Map<string, TypeSpecifier>();
 
   function current(): Token {
     return tokens[pos];
@@ -78,7 +48,26 @@ export function parse(tokens: Token[]): Program {
 
   function isTypeSpec(): boolean {
     const t = current().type;
-    return t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG || t === TokenType.STRUCT;
+    if (t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG || t === TokenType.STRUCT || t === TokenType.ENUM || t === TokenType.UNION || t === TokenType.UNSIGNED) return true;
+    if (t === TokenType.IDENTIFIER && typedefs.has(current().value)) return true;
+    return false;
+  }
+
+  /** Returns the number of tokens the current type specifier consumes */
+  function typeSpecLength(): number {
+    const t = current().type;
+    if (t === TokenType.STRUCT || t === TokenType.UNION) return 2; // struct/union Name
+    if (t === TokenType.ENUM) {
+      // enum Name or just enum (when used as type spec before a name)
+      if (peek(1).type === TokenType.IDENTIFIER) return 2;
+      return 1;
+    }
+    if (t === TokenType.UNSIGNED) {
+      // unsigned int, unsigned char, or just unsigned
+      if (peek(1).type === TokenType.INT || peek(1).type === TokenType.CHAR) return 2;
+      return 1;
+    }
+    return 1; // int, void, char, long, typedef name
   }
 
   function parseTypeSpec(): TypeSpecifier {
@@ -87,13 +76,34 @@ export function parse(tokens: Token[]): Program {
     if (tok.type === TokenType.VOID) { pos++; return "void"; }
     if (tok.type === TokenType.CHAR) { pos++; return "char"; }
     if (tok.type === TokenType.LONG) { pos++; return "long"; }
+    if (tok.type === TokenType.UNSIGNED) {
+      pos++;
+      if (current().type === TokenType.CHAR) { pos++; return "unsigned char"; }
+      if (current().type === TokenType.INT) { pos++; }
+      return "unsigned int";
+    }
     if (tok.type === TokenType.STRUCT) {
       pos++;
       const name = expect(TokenType.IDENTIFIER, "struct name").value;
       return { kind: "struct", name };
     }
+    if (tok.type === TokenType.UNION) {
+      pos++;
+      const name = expect(TokenType.IDENTIFIER, "union name").value;
+      return { kind: "union", name };
+    }
+    if (tok.type === TokenType.ENUM) {
+      pos++;
+      // enum used as type specifier — consume optional name, treat as int
+      if (current().type === TokenType.IDENTIFIER) pos++;
+      return "int";
+    }
+    if (tok.type === TokenType.IDENTIFIER && typedefs.has(tok.value)) {
+      pos++;
+      return typedefs.get(tok.value)!;
+    }
     throw new Error(
-      `Expected type specifier (int/void/char/long/struct) but got '${tok.value || tok.type}' at line ${tok.line}:${tok.col}`
+      `Expected type specifier but got '${tok.value || tok.type}' at line ${tok.line}:${tok.col}`
     );
   }
 
@@ -109,8 +119,6 @@ export function parse(tokens: Token[]): Program {
   function parseExpression(): Expression {
     return parseAssignment();
   }
-
-
 
   function parseAssignment(): Expression {
     // *expr = val (dereference assignment)
@@ -216,23 +224,68 @@ export function parse(tokens: Token[]): Program {
     return left;
   }
 
-  /** logical_and → comparison ('&&' comparison)* */
+  /** logical_and → bitwise_or ('&&' bitwise_or)* */
   function parseLogicalAnd(): Expression {
-    let left = parseComparison();
+    let left = parseBitwiseOr();
     while (current().type === TokenType.AND_AND) {
       const op = current().value as LogicalOperator;
       pos++;
-      const right = parseComparison();
+      const right = parseBitwiseOr();
       left = { type: "LogicalExpression", operator: op, left, right };
     }
     return left;
   }
 
-  /** comparison → additive (('==' | '!=' | '<' | '>' | '<=' | '>=') additive)* */
+  /** bitwise_or → bitwise_xor ('|' bitwise_xor)* */
+  function parseBitwiseOr(): Expression {
+    let left = parseBitwiseXor();
+    while (current().type === TokenType.PIPE) {
+      pos++;
+      const right = parseBitwiseXor();
+      left = { type: "BinaryExpression", operator: "|" as BinaryOperator, left, right };
+    }
+    return left;
+  }
+
+  /** bitwise_xor → bitwise_and ('^' bitwise_and)* */
+  function parseBitwiseXor(): Expression {
+    let left = parseBitwiseAnd();
+    while (current().type === TokenType.CARET) {
+      pos++;
+      const right = parseBitwiseAnd();
+      left = { type: "BinaryExpression", operator: "^" as BinaryOperator, left, right };
+    }
+    return left;
+  }
+
+  /** bitwise_and → comparison ('&' comparison)* */
+  function parseBitwiseAnd(): Expression {
+    let left = parseComparison();
+    while (current().type === TokenType.AMPERSAND) {
+      pos++;
+      const right = parseComparison();
+      left = { type: "BinaryExpression", operator: "&" as BinaryOperator, left, right };
+    }
+    return left;
+  }
+
+  /** comparison → shift (('==' | '!=' | '<' | '>' | '<=' | '>=') shift)* */
   function parseComparison(): Expression {
-    let left = parseAdditive();
+    let left = parseShift();
     while (isComparisonOp()) {
       const op = current().value as ComparisonOperator;
+      pos++;
+      const right = parseShift();
+      left = { type: "BinaryExpression", operator: op, left, right };
+    }
+    return left;
+  }
+
+  /** shift → additive (('<<' | '>>') additive)* */
+  function parseShift(): Expression {
+    let left = parseAdditive();
+    while (current().type === TokenType.LEFT_SHIFT || current().type === TokenType.RIGHT_SHIFT) {
+      const op = current().value as BinaryOperator;
       pos++;
       const right = parseAdditive();
       left = { type: "BinaryExpression", operator: op, left, right };
@@ -281,6 +334,12 @@ export function parse(tokens: Token[]): Program {
       pos++;
       const operand = parseUnary();
       return { type: "UnaryExpression", operator: "!", operand };
+    }
+    // Bitwise NOT: ~expr
+    if (current().type === TokenType.TILDE) {
+      pos++;
+      const operand = parseUnary();
+      return { type: "UnaryExpression", operator: "~", operand };
     }
     // *expr (dereference)
     if (current().type === TokenType.STAR) {
@@ -357,6 +416,12 @@ export function parse(tokens: Token[]): Program {
     }
 
     if (tok.type === TokenType.IDENTIFIER) {
+      // Check if it's an enum constant
+      if (enumConstants.has(tok.value)) {
+        pos++;
+        return { type: "IntegerLiteral", value: enumConstants.get(tok.value)! };
+      }
+
       const name = tok.value;
       pos++;
       // Array access: ident[expr]
@@ -396,11 +461,9 @@ export function parse(tokens: Token[]): Program {
 
     if (tok.type === TokenType.LPAREN) {
       // Lookahead: if ( type_keyword ) then it's a cast
-      // For struct: (struct Name) is 4 tokens: ( struct Name )
-      if (isTypeSpecToken(peek(1).type)) {
-        const isCast = peek(1).type === TokenType.STRUCT
-          ? peek(2).type === TokenType.IDENTIFIER && peek(3).type === TokenType.RPAREN
-          : peek(2).type === TokenType.RPAREN;
+      if (isTypeSpecAtPos(pos + 1)) {
+        // Determine where RPAREN is after the type spec
+        const isCast = isCastExpression();
         if (isCast) {
           pos++; // skip (
           const targetType = parseTypeSpec();
@@ -420,8 +483,30 @@ export function parse(tokens: Token[]): Program {
     );
   }
 
-  function isTypeSpecToken(t: TokenType): boolean {
-    return t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG || t === TokenType.STRUCT;
+  /** Check if position has a type specifier token */
+  function isTypeSpecAtPos(p: number): boolean {
+    const t = tokens[p].type;
+    if (t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG || t === TokenType.STRUCT || t === TokenType.ENUM || t === TokenType.UNION || t === TokenType.UNSIGNED) return true;
+    if (t === TokenType.IDENTIFIER && typedefs.has(tokens[p].value)) return true;
+    return false;
+  }
+
+  /** Determine if current LPAREN starts a cast expression */
+  function isCastExpression(): boolean {
+    // We're at pos pointing to LPAREN, peek(1) is the type spec start
+    const t = peek(1).type;
+    if (t === TokenType.STRUCT || t === TokenType.UNION) {
+      // (struct Name) or (union Name) — 4 tokens
+      return peek(2).type === TokenType.IDENTIFIER && peek(3).type === TokenType.RPAREN;
+    }
+    if (t === TokenType.UNSIGNED) {
+      // (unsigned int) or (unsigned char) or just (unsigned)
+      if (peek(2).type === TokenType.RPAREN) return true;
+      if ((peek(2).type === TokenType.INT || peek(2).type === TokenType.CHAR) && peek(3).type === TokenType.RPAREN) return true;
+      return false;
+    }
+    // Simple type: (int), (char), (long), (void), or (typedef_name)
+    return peek(2).type === TokenType.RPAREN;
   }
 
   // ── Statement parsing ─────────────────────────────────
@@ -455,6 +540,20 @@ export function parse(tokens: Token[]): Program {
       return { type: "StructVariableDeclaration", name, structName };
     }
 
+    // Union variable declaration: union Name varname;
+    if (
+      current().type === TokenType.UNION &&
+      peek(1).type === TokenType.IDENTIFIER &&
+      peek(2).type === TokenType.IDENTIFIER &&
+      peek(3).type === TokenType.SEMICOLON
+    ) {
+      pos++; // skip union
+      const unionName = expect(TokenType.IDENTIFIER, "union name").value;
+      const name = expect(TokenType.IDENTIFIER, "variable name").value;
+      expect(TokenType.SEMICOLON, "';' after union variable declaration");
+      return { type: "StructVariableDeclaration", name, structName: unionName };
+    }
+
     // Pointer-to-struct variable: struct Name *varname = expr;
     if (
       current().type === TokenType.STRUCT &&
@@ -472,12 +571,29 @@ export function parse(tokens: Token[]): Program {
       return { type: "VariableDeclaration", name, typeSpec, initializer, pointer: true };
     }
 
+    // Pointer-to-union variable: union Name *varname = expr;
+    if (
+      current().type === TokenType.UNION &&
+      peek(1).type === TokenType.IDENTIFIER &&
+      peek(2).type === TokenType.STAR &&
+      peek(3).type === TokenType.IDENTIFIER &&
+      peek(4).type === TokenType.EQUALS
+    ) {
+      const typeSpec = parseTypeSpec(); // consumes union + Name
+      pos++; // skip *
+      const name = expect(TokenType.IDENTIFIER, "variable name").value;
+      expect(TokenType.EQUALS, "'=' in variable declaration");
+      const initializer = parseExpression();
+      expect(TokenType.SEMICOLON, "';' after variable declaration");
+      return { type: "VariableDeclaration", name, typeSpec, initializer, pointer: true };
+    }
+
     // Pointer variable declaration: int *p = expr;
     if (
       isTypeSpec() &&
-      peek(1).type === TokenType.STAR &&
-      peek(2).type === TokenType.IDENTIFIER &&
-      peek(3).type === TokenType.EQUALS
+      peek(typeSpecLength()).type === TokenType.STAR &&
+      peek(typeSpecLength() + 1).type === TokenType.IDENTIFIER &&
+      peek(typeSpecLength() + 2).type === TokenType.EQUALS
     ) {
       const typeSpec = parseTypeSpec();
       pos++; // skip '*'
@@ -491,8 +607,8 @@ export function parse(tokens: Token[]): Program {
     // Array declaration: int arr[5]; or int arr[3] = {1, 2, 3};
     if (
       isTypeSpec() &&
-      peek(1).type === TokenType.IDENTIFIER &&
-      peek(2).type === TokenType.LBRACKET
+      peek(typeSpecLength()).type === TokenType.IDENTIFIER &&
+      peek(typeSpecLength() + 1).type === TokenType.LBRACKET
     ) {
       const typeSpec = parseTypeSpec();
       const name = expect(TokenType.IDENTIFIER, "array name").value;
@@ -521,8 +637,8 @@ export function parse(tokens: Token[]): Program {
     // Variable declaration: int x = expr;
     if (
       isTypeSpec() &&
-      peek(1).type === TokenType.IDENTIFIER &&
-      peek(2).type === TokenType.EQUALS
+      peek(typeSpecLength()).type === TokenType.IDENTIFIER &&
+      peek(typeSpecLength() + 1).type === TokenType.EQUALS
     ) {
       const typeSpec = parseTypeSpec();
       const name = expect(TokenType.IDENTIFIER, "variable name").value;
@@ -574,8 +690,8 @@ export function parse(tokens: Token[]): Program {
       let init: Statement;
       if (
         isTypeSpec() &&
-        peek(1).type === TokenType.IDENTIFIER &&
-        peek(2).type === TokenType.EQUALS
+        peek(typeSpecLength()).type === TokenType.IDENTIFIER &&
+        peek(typeSpecLength() + 1).type === TokenType.EQUALS
       ) {
         const typeSpec = parseTypeSpec();
         const name = expect(TokenType.IDENTIFIER, "variable name").value;
@@ -699,11 +815,83 @@ export function parse(tokens: Token[]): Program {
     return { type: "StructDeclaration", name, fields };
   }
 
-  /** Parse a top-level declaration: function, extern, global variable, or struct */
-  function parseTopLevelDecl(): Declaration {
+  /** Parse a union type definition: union Name { type field; ... }; */
+  function parseUnionDeclaration(): Declaration {
+    pos++; // skip 'union'
+    const name = expect(TokenType.IDENTIFIER, "union name").value;
+    expect(TokenType.LBRACE, "'{' after union name");
+    const fields: { name: string; typeSpec: TypeSpecifier }[] = [];
+    while (current().type !== TokenType.RBRACE && current().type !== TokenType.EOF) {
+      const fieldType = parseTypeSpec();
+      const fieldName = expect(TokenType.IDENTIFIER, "field name").value;
+      expect(TokenType.SEMICOLON, "';' after field declaration");
+      fields.push({ name: fieldName, typeSpec: fieldType });
+    }
+    expect(TokenType.RBRACE, "'}' after union fields");
+    expect(TokenType.SEMICOLON, "';' after union declaration");
+    return { type: "UnionDeclaration", name, fields };
+  }
+
+  /** Parse an enum declaration: enum Name { A, B = 5, C }; */
+  function parseEnumDeclaration(): Declaration {
+    pos++; // skip 'enum'
+    let name: string | null = null;
+    if (current().type === TokenType.IDENTIFIER && peek(1).type === TokenType.LBRACE) {
+      name = current().value;
+      pos++;
+    }
+    expect(TokenType.LBRACE, "'{' after enum");
+    const members: { name: string; value: number }[] = [];
+    let nextValue = 0;
+    while (current().type !== TokenType.RBRACE && current().type !== TokenType.EOF) {
+      const memberName = expect(TokenType.IDENTIFIER, "enum member name").value;
+      if (current().type === TokenType.EQUALS) {
+        pos++;
+        const valTok = expect(TokenType.NUMBER, "enum value");
+        nextValue = parseInt(valTok.value, 10);
+      }
+      members.push({ name: memberName, value: nextValue });
+      enumConstants.set(memberName, nextValue);
+      nextValue++;
+      if (current().type === TokenType.COMMA) pos++;
+    }
+    expect(TokenType.RBRACE, "'}' after enum members");
+    expect(TokenType.SEMICOLON, "';' after enum declaration");
+    return { type: "EnumDeclaration", name, members };
+  }
+
+  /** Parse a typedef: typedef type alias; */
+  function parseTypedef(): Declaration | null {
+    pos++; // skip 'typedef'
+    const baseType = parseTypeSpec();
+    // Optional pointer
+    if (current().type === TokenType.STAR) pos++;
+    const aliasName = expect(TokenType.IDENTIFIER, "typedef alias name").value;
+    expect(TokenType.SEMICOLON, "';' after typedef");
+    typedefs.set(aliasName, baseType);
+    return null; // typedef doesn't produce an AST declaration
+  }
+
+  /** Parse a top-level declaration: function, extern, global variable, struct, enum, union, typedef */
+  function parseTopLevelDecl(): Declaration | null {
     // Struct definition: struct Name { ... };
     if (current().type === TokenType.STRUCT && peek(1).type === TokenType.IDENTIFIER && peek(2).type === TokenType.LBRACE) {
       return parseStructDeclaration();
+    }
+
+    // Union definition: union Name { ... };
+    if (current().type === TokenType.UNION && peek(1).type === TokenType.IDENTIFIER && peek(2).type === TokenType.LBRACE) {
+      return parseUnionDeclaration();
+    }
+
+    // Enum definition: enum Name { ... };
+    if (current().type === TokenType.ENUM && (peek(1).type === TokenType.LBRACE || (peek(1).type === TokenType.IDENTIFIER && peek(2).type === TokenType.LBRACE))) {
+      return parseEnumDeclaration();
+    }
+
+    // Typedef
+    if (current().type === TokenType.TYPEDEF) {
+      return parseTypedef();
     }
 
     const typeSpec = parseTypeSpec();
@@ -744,7 +932,8 @@ export function parse(tokens: Token[]): Program {
   function parseProgram(): Program {
     const declarations: Declaration[] = [];
     while (current().type !== TokenType.EOF) {
-      declarations.push(parseTopLevelDecl());
+      const decl = parseTopLevelDecl();
+      if (decl !== null) declarations.push(decl);
     }
     return { type: "Program", declarations };
   }

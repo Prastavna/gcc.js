@@ -18,6 +18,10 @@ export const TokenType = {
   DEFAULT: "DEFAULT",
   BREAK: "BREAK",
   CONTINUE: "CONTINUE",
+  ENUM: "ENUM",
+  TYPEDEF: "TYPEDEF",
+  UNION: "UNION",
+  UNSIGNED: "UNSIGNED",
 
   // Literals
   NUMBER: "NUMBER",
@@ -43,8 +47,13 @@ export const TokenType = {
   PERCENT: "PERCENT",
   EQUALS: "EQUALS",
 
-  // Pointer
+  // Pointer / Bitwise
   AMPERSAND: "AMPERSAND",  // &
+  PIPE: "PIPE",            // |
+  CARET: "CARET",          // ^
+  TILDE: "TILDE",          // ~
+  LEFT_SHIFT: "LEFT_SHIFT",   // <<
+  RIGHT_SHIFT: "RIGHT_SHIFT", // >>
 
   // Comparison operators
   EQ: "EQ",       // ==
@@ -98,7 +107,12 @@ export interface StructTypeSpecifier {
   name: string;
 }
 
-export type TypeSpecifier = "int" | "void" | "char" | "long" | StructTypeSpecifier;
+export interface UnionTypeSpecifier {
+  kind: "union";
+  name: string;
+}
+
+export type TypeSpecifier = "int" | "void" | "char" | "long" | "unsigned int" | "unsigned char" | StructTypeSpecifier | UnionTypeSpecifier;
 
 export interface IntegerLiteral {
   type: "IntegerLiteral";
@@ -110,7 +124,7 @@ export interface StringLiteral {
   value: string;
 }
 
-export type BinaryOperator = "+" | "-" | "*" | "/" | "%";
+export type BinaryOperator = "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>";
 export type ComparisonOperator = "==" | "!=" | "<" | ">" | "<=" | ">=";
 
 export interface BinaryExpression {
@@ -120,7 +134,7 @@ export interface BinaryExpression {
   right: Expression;
 }
 
-export type UnaryOperator = "-" | "!";
+export type UnaryOperator = "-" | "!" | "~";
 
 export interface UnaryExpression {
   type: "UnaryExpression";
@@ -414,7 +428,19 @@ export interface StructDeclaration {
   fields: StructFieldDeclaration[];
 }
 
-export type Declaration = FunctionDeclaration | ExternFunctionDeclaration | GlobalVariableDeclaration | StructDeclaration;
+export interface EnumDeclaration {
+  type: "EnumDeclaration";
+  name: string | null;
+  members: { name: string; value: number }[];
+}
+
+export interface UnionDeclaration {
+  type: "UnionDeclaration";
+  name: string;
+  fields: StructFieldDeclaration[];
+}
+
+export type Declaration = FunctionDeclaration | ExternFunctionDeclaration | GlobalVariableDeclaration | StructDeclaration | EnumDeclaration | UnionDeclaration;
 
 export interface Program {
   type: "Program";

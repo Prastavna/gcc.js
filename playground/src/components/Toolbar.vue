@@ -113,6 +113,18 @@ const examples: { label: string; code: string }[] = [
     label: 'MAX/MIN macros',
     code: `#define MAX(a, b) ((a) > (b) ? (a) : (b))\n#define MIN(a, b) ((a) < (b) ? (a) : (b))\n#define CLAMP(x, lo, hi) MIN(MAX(x, lo), hi)\n\nint main() {\n    int val = 150;\n    return CLAMP(val, 0, 100);\n}`,
   },
+  {
+    label: 'Enum + switch',
+    code: `enum Color { RED, GREEN, BLUE };\n\nint classify(int c) {\n    switch (c) {\n        case RED: return 0;\n        case GREEN: return 1;\n        case BLUE: return 2;\n        default: return 99;\n    }\n}\n\nint main() {\n    return classify(GREEN);\n}`,
+  },
+  {
+    label: 'Bitwise flags',
+    code: `int main() {\n    int flags = 0;\n    flags = flags | (1 << 0);  // set bit 0\n    flags = flags | (1 << 2);  // set bit 2\n    flags = flags & ~(1 << 0); // clear bit 0\n    return flags;  // 4\n}`,
+  },
+  {
+    label: 'Typedef + unsigned',
+    code: `typedef unsigned int uint;\ntypedef int bool;\n\nbool is_even(uint x) {\n    return (x & 1) == 0;\n}\n\nint main() {\n    uint x = 42;\n    return is_even(x);\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

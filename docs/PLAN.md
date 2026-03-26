@@ -420,7 +420,7 @@ int main() {
 - [x] `register` storage class (parsed and accepted, hint only)
 - [x] `auto` storage class (parsed and accepted, default for locals)
 
-### Milestone 21: Advanced preprocessor
+### Milestone 21: Advanced preprocessor [DONE]
 ```c
 #if defined(DEBUG) && (VERSION > 2)
 int get_value() { return 42; }
@@ -437,14 +437,14 @@ int main() {
     return get_value();
 }
 ```
-- [ ] `#if` with constant expressions (arithmetic, comparisons, logical)
-- [ ] `#elif` with constant expressions
-- [ ] `defined(NAME)` operator inside `#if` / `#elif`
-- [ ] `#error "message"` directive
-- [ ] Stringification operator (`#param` in function-like macros)
-- [ ] Token pasting operator (`a##b` in function-like macros)
-- [ ] `#line` directive (update reported line numbers)
-- [ ] `#pragma` (parsed and ignored)
+- [x] `#if` with constant expressions (arithmetic, comparisons, logical)
+- [x] `#elif` with constant expressions
+- [x] `defined(NAME)` operator inside `#if` / `#elif`
+- [x] `#error "message"` directive
+- [x] Stringification operator (`#param` in function-like macros)
+- [x] Token pasting operator (`a##b` in function-like macros)
+- [x] `#line` directive (parsed and accepted)
+- [x] `#pragma` (parsed and ignored)
 
 ### Milestone 22: Forward declarations and function pointers
 ```c

@@ -181,7 +181,7 @@ describe("preprocessor", () => {
     });
 
     it("errors on #endif without #ifdef", () => {
-      expect(() => preprocess("#endif")).toThrow(/#endif without #ifdef/);
+      expect(() => preprocess("#endif")).toThrow(/#endif without/);
     });
 
     it("errors on unterminated #ifdef", () => {
@@ -304,6 +304,236 @@ describe("preprocessor", () => {
       expect(lines.length).toBe(4); // same number of lines
       expect(lines[0]).toBe(""); // directive replaced with blank
       expect(lines[2]).toContain("return 42;");
+    });
+  });
+
+  // ── #if / #elif with constant expressions ─────────────────
+
+  describe("#if / #elif", () => {
+    it("#if with simple truthy constant", () => {
+      const src = "#if 1\nint x = 1;\n#endif";
+      expect(preprocess(src)).toContain("int x = 1;");
+    });
+
+    it("#if with simple falsy constant", () => {
+      const src = "#if 0\nint x = 1;\n#endif";
+      expect(preprocess(src)).not.toContain("int x = 1;");
+    });
+
+    it("#if with arithmetic expression", () => {
+      const src = "#if 2 + 3 > 4\nint x = 1;\n#endif";
+      expect(preprocess(src)).toContain("int x = 1;");
+    });
+
+    it("#if with defined() operator", () => {
+      const src = "#define FOO\n#if defined(FOO)\nint x = 1;\n#endif";
+      expect(preprocess(src)).toContain("int x = 1;");
+    });
+
+    it("#if with defined() on undefined macro", () => {
+      const src = "#if defined(FOO)\nint x = 1;\n#endif";
+      expect(preprocess(src)).not.toContain("int x = 1;");
+    });
+
+    it("#if with defined without parens", () => {
+      const src = "#define BAR\n#if defined BAR\nint x = 1;\n#endif";
+      expect(preprocess(src)).toContain("int x = 1;");
+    });
+
+    it("#if with logical AND", () => {
+      const src = "#if 1 && 0\nint x = 1;\n#endif";
+      expect(preprocess(src)).not.toContain("int x = 1;");
+    });
+
+    it("#if with logical OR", () => {
+      const src = "#if 0 || 1\nint x = 1;\n#endif";
+      expect(preprocess(src)).toContain("int x = 1;");
+    });
+
+    it("#if with negation", () => {
+      const src = "#if !0\nint x = 1;\n#endif";
+      expect(preprocess(src)).toContain("int x = 1;");
+    });
+
+    it("#if with macro value comparison", () => {
+      const src = `#define VERSION 3\n#if VERSION > 2\nint x = 1;\n#endif`;
+      expect(preprocess(src)).toContain("int x = 1;");
+    });
+
+    it("#if with undefined identifier treated as 0", () => {
+      const src = "#if UNDEF\nint x = 1;\n#endif";
+      expect(preprocess(src)).not.toContain("int x = 1;");
+    });
+
+    it("#if / #elif chain — first match wins", () => {
+      const src = [
+        "#define X 2",
+        "#if X == 1",
+        "int v = 1;",
+        "#elif X == 2",
+        "int v = 2;",
+        "#elif X == 3",
+        "int v = 3;",
+        "#else",
+        "int v = 99;",
+        "#endif",
+      ].join("\n");
+      const result = preprocess(src);
+      expect(result).toContain("int v = 2;");
+      expect(result).not.toContain("int v = 1;");
+      expect(result).not.toContain("int v = 3;");
+      expect(result).not.toContain("int v = 99;");
+    });
+
+    it("#elif falls through to #else when no match", () => {
+      const src = [
+        "#define X 5",
+        "#if X == 1",
+        "int v = 1;",
+        "#elif X == 2",
+        "int v = 2;",
+        "#else",
+        "int v = 99;",
+        "#endif",
+      ].join("\n");
+      const result = preprocess(src);
+      expect(result).toContain("int v = 99;");
+    });
+
+    it("#if with defined() && comparison (target program pattern)", () => {
+      const result = preprocess(
+        "#if defined(DEBUG) && (VERSION > 2)\nint v = 42;\n#else\nint v = -1;\n#endif",
+        { defines: { DEBUG: "1", VERSION: "3" } },
+      );
+      expect(result).toContain("int v = 42;");
+    });
+
+    it("#if with bitwise operators", () => {
+      const src = "#if (3 & 1) == 1\nint x = 1;\n#endif";
+      expect(preprocess(src)).toContain("int x = 1;");
+    });
+
+    it("#if with shift operators", () => {
+      const src = "#if (1 << 3) == 8\nint x = 1;\n#endif";
+      expect(preprocess(src)).toContain("int x = 1;");
+    });
+
+    it("#if with unary minus", () => {
+      const src = "#if -1 < 0\nint x = 1;\n#endif";
+      expect(preprocess(src)).toContain("int x = 1;");
+    });
+
+    it("#if with nested parentheses", () => {
+      const src = "#if ((1 + 2) * 3) == 9\nint x = 1;\n#endif";
+      expect(preprocess(src)).toContain("int x = 1;");
+    });
+
+    it("#if nested inside #ifdef", () => {
+      const src = [
+        "#define A",
+        "#ifdef A",
+        "#if 1",
+        "int x = 1;",
+        "#endif",
+        "#endif",
+      ].join("\n");
+      expect(preprocess(src)).toContain("int x = 1;");
+    });
+
+    it("errors on #elif without #if", () => {
+      expect(() => preprocess("#elif 1")).toThrow(/#elif without/);
+    });
+  });
+
+  // ── #error ────────────────────────────────────────────────
+
+  describe("#error", () => {
+    it("throws with the error message", () => {
+      const src = '#error "something went wrong"';
+      expect(() => preprocess(src)).toThrow(/#error.*something went wrong/);
+    });
+
+    it("does not throw in inactive region", () => {
+      const src = "#if 0\n#error should not fire\n#endif";
+      expect(() => preprocess(src)).not.toThrow();
+    });
+  });
+
+  // ── #pragma ───────────────────────────────────────────────
+
+  describe("#pragma", () => {
+    it("is silently ignored", () => {
+      const src = "#pragma once\nint x = 1;";
+      const result = preprocess(src);
+      expect(result).toContain("int x = 1;");
+      expect(result).not.toContain("#pragma");
+    });
+  });
+
+  // ── #line ─────────────────────────────────────────────────
+
+  describe("#line", () => {
+    it("is silently ignored", () => {
+      const src = '#line 100 "file.c"\nint x = 1;';
+      const result = preprocess(src);
+      expect(result).toContain("int x = 1;");
+      expect(result).not.toContain("#line");
+    });
+  });
+
+  // ── Stringification (#) ───────────────────────────────────
+
+  describe("stringification (#)", () => {
+    it("stringifies a macro argument", () => {
+      const src = `#define STR(x) #x\nchar *s = STR(hello);`;
+      const result = preprocess(src);
+      expect(result).toContain('"hello"');
+    });
+
+    it("stringifies an expression argument", () => {
+      const src = `#define STR(x) #x\nchar *s = STR(1 + 2);`;
+      const result = preprocess(src);
+      expect(result).toContain('"1 + 2"');
+    });
+
+    it("escapes quotes in stringified argument", () => {
+      const src = `#define STR(x) #x\nchar *s = STR(say "hi");`;
+      const result = preprocess(src);
+      expect(result).toContain('"say \\"hi\\""');
+    });
+
+    it("does not confuse # with ##", () => {
+      const src = `#define CONCAT(a, b) a##b\nint CONCAT(foo, bar) = 1;`;
+      const result = preprocess(src);
+      expect(result).toContain("int foobar = 1;");
+    });
+  });
+
+  // ── Token pasting (##) ────────────────────────────────────
+
+  describe("token pasting (##)", () => {
+    it("concatenates two identifiers", () => {
+      const src = `#define CONCAT(a, b) a##b\nint CONCAT(foo, bar) = 1;`;
+      const result = preprocess(src);
+      expect(result).toContain("int foobar = 1;");
+    });
+
+    it("concatenates identifier and number", () => {
+      const src = `#define VAR(n) x##n\nint VAR(1) = 10;`;
+      const result = preprocess(src);
+      expect(result).toContain("int x1 = 10;");
+    });
+
+    it("concatenates with multiple ##", () => {
+      const src = `#define JOIN3(a, b, c) a##b##c\nint JOIN3(a, b, c) = 1;`;
+      const result = preprocess(src);
+      expect(result).toContain("int abc = 1;");
+    });
+
+    it("works with spaces around ##", () => {
+      const src = `#define PASTE(a, b) a ## b\nint PASTE(foo, bar) = 1;`;
+      const result = preprocess(src);
+      expect(result).toContain("int foobar = 1;");
     });
   });
 

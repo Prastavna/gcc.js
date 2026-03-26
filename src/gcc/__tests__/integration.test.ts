@@ -3211,4 +3211,87 @@ describe("integration: compile() end-to-end", () => {
       expect(instance.exports.counter).toBeUndefined();
     });
   });
+
+  // ── Milestone 21: Advanced preprocessor ─────────────────
+
+  describe("milestone 21: advanced preprocessor", () => {
+    it("#if with defined() and comparison — target program", async () => {
+      const source = `
+        #if defined(DEBUG) && (VERSION > 2)
+        int get_value() { return 42; }
+        #elif VERSION == 1
+        int get_value() { return 0; }
+        #else
+        int get_value() { return -1; }
+        #endif
+
+        int main() { return get_value(); }
+      `;
+      const instance = await compileAndInstantiate(source, {
+        defines: { DEBUG: "1", VERSION: "3" },
+      });
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("#elif branch selected when first #if is false", async () => {
+      const source = `
+        #if defined(DEBUG) && (VERSION > 2)
+        int get_value() { return 42; }
+        #elif VERSION == 1
+        int get_value() { return 0; }
+        #else
+        int get_value() { return -1; }
+        #endif
+
+        int main() { return get_value(); }
+      `;
+      const instance = await compileAndInstantiate(source, {
+        defines: { VERSION: "1" },
+      });
+      expect((instance.exports.main as () => number)()).toBe(0);
+    });
+
+    it("#else branch selected when no conditions match", async () => {
+      const source = `
+        #if defined(DEBUG) && (VERSION > 2)
+        int get_value() { return 42; }
+        #elif VERSION == 1
+        int get_value() { return 0; }
+        #else
+        int get_value() { return -1; }
+        #endif
+
+        int main() { return get_value(); }
+      `;
+      const instance = await compileAndInstantiate(source, {
+        defines: { VERSION: "5" },
+      });
+      expect((instance.exports.main as () => number)()).toBe(-1);
+    });
+
+    it("#if with arithmetic expression controls compilation", async () => {
+      const source = `
+        #define SIZE 10
+        #if SIZE * 2 > 15
+        int main() { return 1; }
+        #else
+        int main() { return 0; }
+        #endif
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("#error in active region prevents compilation", () => {
+      const source = `
+        #define UNSUPPORTED
+        #ifdef UNSUPPORTED
+        #error "feature not supported"
+        #endif
+        int main() { return 0; }
+      `;
+      const result = compile(source);
+      expect(result.ok).toBe(false);
+    });
+  });
 });

@@ -1,6 +1,7 @@
 // ── C Preprocessor ──────────────────────────────────────────
 // Runs before the lexer: processes #define, #ifdef/#ifndef/#endif,
-// #include, and #undef directives. Expands macros in source text.
+// #if/#elif, #include, #undef, #error, #pragma, #line directives.
+// Supports stringification (#) and token pasting (##) in macros.
 
 export interface PreprocessorOptions {
   /** Virtual filesystem for #include: filename → source content */
@@ -82,30 +83,44 @@ function preprocessSource(
         continue;
       }
 
+      if (directive.name === "if") {
+        const parentActive = isActive();
+        let active = false;
+        if (parentActive) {
+          active = evaluateConstExpr(directive.args, macros) !== 0;
+        }
+        condStack.push({ active: parentActive && active, parentActive, elseSeen: false, satisfied: parentActive && active });
+        output.push("");
+        continue;
+      }
+
       if (directive.name === "else") {
-        if (condStack.length === 0) throw new Error(`Preprocessor error: #else without #ifdef/#ifndef (line ${i + 1})`);
+        if (condStack.length === 0) throw new Error(`Preprocessor error: #else without #if/#ifdef/#ifndef (line ${i + 1})`);
         const top = condStack[condStack.length - 1];
         if (top.elseSeen) throw new Error(`Preprocessor error: duplicate #else (line ${i + 1})`);
         top.elseSeen = true;
-        // Only activate #else if parent is active AND no branch was satisfied yet
         top.active = top.parentActive && !top.satisfied;
         output.push("");
         continue;
       }
 
       if (directive.name === "elif") {
-        if (condStack.length === 0) throw new Error(`Preprocessor error: #elif without #ifdef/#ifndef (line ${i + 1})`);
+        if (condStack.length === 0) throw new Error(`Preprocessor error: #elif without #if/#ifdef/#ifndef (line ${i + 1})`);
         const top = condStack[condStack.length - 1];
         if (top.elseSeen) throw new Error(`Preprocessor error: #elif after #else (line ${i + 1})`);
-        // Simple #elif: treat the argument as a macro name check (defined)
-        // For now, support #elif defined(NAME) or just evaluate as truthy constant
-        // We'll keep it simple: #elif is not common in basic usage, skip for now
+        if (top.satisfied || !top.parentActive) {
+          top.active = false;
+        } else {
+          const val = evaluateConstExpr(directive.args, macros) !== 0;
+          top.active = val;
+          if (val) top.satisfied = true;
+        }
         output.push("");
         continue;
       }
 
       if (directive.name === "endif") {
-        if (condStack.length === 0) throw new Error(`Preprocessor error: #endif without #ifdef/#ifndef (line ${i + 1})`);
+        if (condStack.length === 0) throw new Error(`Preprocessor error: #endif without #if/#ifdef/#ifndef (line ${i + 1})`);
         condStack.pop();
         output.push("");
         continue;
@@ -127,6 +142,15 @@ function preprocessSource(
         const macroName = directive.args.trim();
         if (!macroName) throw new Error(`Preprocessor error: #undef requires a macro name (line ${i + 1})`);
         macros.delete(macroName);
+        output.push("");
+        continue;
+      }
+
+      if (directive.name === "error") {
+        throw new Error(`Preprocessor error: #error ${directive.args} (line ${i + 1})`);
+      }
+
+      if (directive.name === "pragma" || directive.name === "line") {
         output.push("");
         continue;
       }
@@ -276,11 +300,19 @@ function expandMacros(text: string, macros: Map<string, Macro>, expanding: Set<s
           );
         }
 
-        // Substitute params in body
+        // Stringification: replace #param with "arg"
         let body = macro.body;
+        for (let p = 0; p < macro.params.length; p++) {
+          body = applyStringify(body, macro.params[p], args[p]);
+        }
+
+        // Substitute params in body
         for (let p = 0; p < macro.params.length; p++) {
           body = replaceIdentifier(body, macro.params[p], args[p]);
         }
+
+        // Token pasting: remove ## and join adjacent tokens
+        body = body.replace(/\s*##\s*/g, "");
 
         const newExpanding = new Set(expanding);
         newExpanding.add(ident);
@@ -377,6 +409,215 @@ function replaceIdentifier(text: string, name: string, replacement: string): str
   }
 
   return result;
+}
+
+// ── Stringification ─────────────────────────────────────────
+
+function applyStringify(body: string, paramName: string, argValue: string): string {
+  // Replace #paramName with "argValue" (stringify operator)
+  // Must skip ## (token pasting) — only match # not followed by #
+  let result = "";
+  let i = 0;
+  while (i < body.length) {
+    if (body[i] === "#") {
+      // Skip ## (token pasting operator)
+      if (i + 1 < body.length && body[i + 1] === "#") {
+        result += "##";
+        i += 2;
+        continue;
+      }
+      // Also skip if preceded by another # (we already consumed it, but check for safety)
+      // Check if followed by paramName (with optional whitespace)
+      let j = i + 1;
+      while (j < body.length && (body[j] === " " || body[j] === "\t")) j++;
+      if (j < body.length && isIdentStart(body[j])) {
+        const start = j;
+        while (j < body.length && isIdentChar(body[j])) j++;
+        const ident = body.slice(start, j);
+        if (ident === paramName) {
+          const escaped = argValue.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+          result += `"${escaped}"`;
+          i = j;
+          continue;
+        }
+      }
+    }
+    result += body[i];
+    i++;
+  }
+  return result;
+}
+
+// ── Constant Expression Evaluator ───────────────────────────
+
+type CppToken = { kind: "num"; val: number } | { kind: "op"; val: string } | { kind: "paren"; val: string };
+
+function tokenizeConstExpr(expr: string): CppToken[] {
+  const tokens: CppToken[] = [];
+  let i = 0;
+  while (i < expr.length) {
+    if (expr[i] === " " || expr[i] === "\t") { i++; continue; }
+    if (expr[i] >= "0" && expr[i] <= "9") {
+      let start = i;
+      while (i < expr.length && expr[i] >= "0" && expr[i] <= "9") i++;
+      // Skip suffixes like L, U, LL
+      while (i < expr.length && (expr[i] === "l" || expr[i] === "L" || expr[i] === "u" || expr[i] === "U")) i++;
+      tokens.push({ kind: "num", val: parseInt(expr.slice(start, i), 10) });
+      continue;
+    }
+    if (expr[i] === "(" || expr[i] === ")") {
+      tokens.push({ kind: "paren", val: expr[i] });
+      i++;
+      continue;
+    }
+    // Two-char operators
+    const two = expr.slice(i, i + 2);
+    if (two === "==" || two === "!=" || two === "<=" || two === ">=" || two === "&&" || two === "||" || two === "<<" || two === ">>") {
+      tokens.push({ kind: "op", val: two });
+      i += 2;
+      continue;
+    }
+    // Single-char operators
+    if ("+-*/%<>&|^~!".includes(expr[i])) {
+      tokens.push({ kind: "op", val: expr[i] });
+      i++;
+      continue;
+    }
+    // Skip any other character (shouldn't happen after preprocessing)
+    i++;
+  }
+  return tokens;
+}
+
+function evaluateConstExpr(expr: string, macros: Map<string, Macro>): number {
+  // 1. Handle defined(NAME) and defined NAME before macro expansion
+  let processed = expr.replace(/\bdefined\s*\(\s*(\w+)\s*\)/g, (_, name) => macros.has(name) ? "1" : "0");
+  processed = processed.replace(/\bdefined\s+(\w+)/g, (_, name) => macros.has(name) ? "1" : "0");
+
+  // 2. Expand macros
+  processed = expandMacros(processed, macros, new Set());
+
+  // 3. Replace remaining identifiers with 0 (C spec)
+  processed = processed.replace(/\b[a-zA-Z_]\w*\b/g, "0");
+
+  // 4. Tokenize and parse
+  const tokens = tokenizeConstExpr(processed);
+  let pos = 0;
+
+  function peek(): CppToken | undefined { return tokens[pos]; }
+  function advance(): CppToken { return tokens[pos++]; }
+
+  function parseOr(): number {
+    let left = parseAnd();
+    while (peek()?.kind === "op" && peek()!.val === "||") { advance(); left = (left || parseAnd()) ? 1 : 0; }
+    return left;
+  }
+
+  function parseAnd(): number {
+    let left = parseBitOr();
+    while (peek()?.kind === "op" && peek()!.val === "&&") { advance(); left = (left && parseBitOr()) ? 1 : 0; }
+    return left;
+  }
+
+  function parseBitOr(): number {
+    let left = parseBitXor();
+    while (peek()?.kind === "op" && peek()!.val === "|") { advance(); left = left | parseBitXor(); }
+    return left;
+  }
+
+  function parseBitXor(): number {
+    let left = parseBitAnd();
+    while (peek()?.kind === "op" && peek()!.val === "^") { advance(); left = left ^ parseBitAnd(); }
+    return left;
+  }
+
+  function parseBitAnd(): number {
+    let left = parseEquality();
+    while (peek()?.kind === "op" && peek()!.val === "&") { advance(); left = left & parseEquality(); }
+    return left;
+  }
+
+  function parseEquality(): number {
+    let left = parseRelational();
+    while (peek()?.kind === "op" && (peek()!.val === "==" || peek()!.val === "!=")) {
+      const op = advance().val;
+      const right = parseRelational();
+      left = op === "==" ? (left === right ? 1 : 0) : (left !== right ? 1 : 0);
+    }
+    return left;
+  }
+
+  function parseRelational(): number {
+    let left = parseShift();
+    while (peek()?.kind === "op" && (peek()!.val === "<" || peek()!.val === ">" || peek()!.val === "<=" || peek()!.val === ">=")) {
+      const op = advance().val;
+      const right = parseShift();
+      if (op === "<") left = left < right ? 1 : 0;
+      else if (op === ">") left = left > right ? 1 : 0;
+      else if (op === "<=") left = left <= right ? 1 : 0;
+      else left = left >= right ? 1 : 0;
+    }
+    return left;
+  }
+
+  function parseShift(): number {
+    let left = parseAdditive();
+    while (peek()?.kind === "op" && (peek()!.val === "<<" || peek()!.val === ">>")) {
+      const op = advance().val;
+      const right = parseAdditive();
+      left = op === "<<" ? left << right : left >> right;
+    }
+    return left;
+  }
+
+  function parseAdditive(): number {
+    let left = parseMultiplicative();
+    while (peek()?.kind === "op" && (peek()!.val === "+" || peek()!.val === "-")) {
+      const op = advance().val;
+      const right = parseMultiplicative();
+      left = op === "+" ? left + right : left - right;
+    }
+    return left;
+  }
+
+  function parseMultiplicative(): number {
+    let left = parseUnary();
+    while (peek()?.kind === "op" && (peek()!.val === "*" || peek()!.val === "/" || peek()!.val === "%")) {
+      const op = advance().val;
+      const right = parseUnary();
+      if (op === "*") left = left * right;
+      else if (op === "/") left = right !== 0 ? Math.trunc(left / right) : 0;
+      else left = right !== 0 ? left % right : 0;
+    }
+    return left;
+  }
+
+  function parseUnary(): number {
+    const t = peek();
+    if (t?.kind === "op") {
+      if (t.val === "!") { advance(); return parseUnary() ? 0 : 1; }
+      if (t.val === "-") { advance(); return -parseUnary(); }
+      if (t.val === "+") { advance(); return parseUnary(); }
+      if (t.val === "~") { advance(); return ~parseUnary(); }
+    }
+    return parsePrimary();
+  }
+
+  function parsePrimary(): number {
+    const t = peek();
+    if (!t) return 0;
+    if (t.kind === "num") { advance(); return t.val; }
+    if (t.kind === "paren" && t.val === "(") {
+      advance();
+      const val = parseOr();
+      if (peek()?.kind === "paren" && peek()!.val === ")") advance();
+      return val;
+    }
+    advance(); // skip unknown
+    return 0;
+  }
+
+  return parseOr();
 }
 
 // ── Character Helpers ───────────────────────────────────────

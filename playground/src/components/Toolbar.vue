@@ -159,6 +159,14 @@ const examples: { label: string; code: string }[] = [
     label: 'Const & static',
     code: `const int MAX = 100;\nstatic int helper() { return 42; }\n\nint main() {\n    const volatile int x = helper();\n    return x + MAX;\n}`,
   },
+  {
+    label: '#if / #elif',
+    code: `#define VERSION 3\n\n#if VERSION > 2\nint get_value() { return 42; }\n#elif VERSION == 2\nint get_value() { return 20; }\n#else\nint get_value() { return 0; }\n#endif\n\nint main() {\n    return get_value();\n}`,
+  },
+  {
+    label: 'Stringify & paste',
+    code: `#define CONCAT(a, b) a##b\n#define MAKE_VAR(n) CONCAT(var, n)\n\nint main() {\n    int MAKE_VAR(1) = 10;\n    int MAKE_VAR(2) = 20;\n    return var1 + var2;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

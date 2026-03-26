@@ -151,7 +151,7 @@ const wasmBytes = generate(ast);
 
 ---
 
-## Supported C Subset (through Milestone 20)
+## Supported C Subset (through Milestone 21)
 
 ### Types
 - `int` (32-bit signed), `char` (8-bit signed), `short` (16-bit signed), `long` (64-bit signed), `void`
@@ -213,7 +213,14 @@ const wasmBytes = generate(ast);
 - `#define NAME(a, b) body` — function-like macro
 - `#undef NAME`
 - `#ifdef NAME` / `#ifndef NAME` / `#else` / `#endif`
+- `#if` / `#elif` with constant expressions (arithmetic, comparisons, logical, bitwise)
+- `defined(NAME)` operator inside `#if` / `#elif`
 - `#include "file"` / `#include <file>` (virtual filesystem)
 - Include guards
+- `#error "message"` — abort compilation with error
+- `#pragma` — parsed and ignored
+- `#line` — parsed and accepted
+- Stringification operator (`#param` in function-like macros)
+- Token pasting operator (`a##b` in function-like macros)
 
 See [PLAN.md](./PLAN.md) for the full roadmap.

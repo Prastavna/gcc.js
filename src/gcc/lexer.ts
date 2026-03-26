@@ -26,6 +26,14 @@ const KEYWORDS: Record<string, TokenType> = {
   goto: TokenType.GOTO,
   float: TokenType.FLOAT,
   double: TokenType.DOUBLE,
+  short: TokenType.SHORT,
+  signed: TokenType.SIGNED,
+  const: TokenType.CONST,
+  volatile: TokenType.VOLATILE,
+  static: TokenType.STATIC,
+  extern: TokenType.EXTERN,
+  register: TokenType.REGISTER,
+  auto: TokenType.AUTO,
 };
 
 const SIMPLE_TOKENS: Record<string, TokenType> = {

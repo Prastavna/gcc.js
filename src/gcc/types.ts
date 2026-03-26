@@ -26,6 +26,14 @@ export const TokenType = {
   GOTO: "GOTO",
   FLOAT: "FLOAT",
   DOUBLE: "DOUBLE",
+  SHORT: "SHORT",
+  SIGNED: "SIGNED",
+  CONST: "CONST",
+  VOLATILE: "VOLATILE",
+  STATIC: "STATIC",
+  EXTERN: "EXTERN",
+  REGISTER: "REGISTER",
+  AUTO: "AUTO",
 
   // Literals
   NUMBER: "NUMBER",
@@ -116,7 +124,7 @@ export interface UnionTypeSpecifier {
   name: string;
 }
 
-export type TypeSpecifier = "int" | "void" | "char" | "long" | "float" | "double" | "unsigned int" | "unsigned char" | StructTypeSpecifier | UnionTypeSpecifier;
+export type TypeSpecifier = "int" | "void" | "char" | "short" | "long" | "float" | "double" | "unsigned int" | "unsigned char" | "unsigned short" | StructTypeSpecifier | UnionTypeSpecifier;
 
 export interface IntegerLiteral {
   type: "IntegerLiteral";
@@ -439,6 +447,7 @@ export interface FunctionDeclaration {
   returnType: TypeSpecifier;
   params: Parameter[];
   body: Statement[];
+  isStatic?: boolean;
 }
 
 export interface ExternFunctionDeclaration {
@@ -453,6 +462,8 @@ export interface GlobalVariableDeclaration {
   name: string;
   typeSpec: TypeSpecifier;
   initializer: Expression;
+  isStatic?: boolean;
+  isConst?: boolean;
 }
 
 export interface StructFieldDeclaration {

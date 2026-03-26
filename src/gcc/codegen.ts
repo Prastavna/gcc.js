@@ -23,10 +23,10 @@ import {
 
 // ── C type helpers ──────────────────────────────────────────
 
-type CType = "char" | "int" | "long" | "void" | "uchar" | "uint" | "float" | "double";
+type CType = "char" | "short" | "int" | "long" | "void" | "uchar" | "ushort" | "uint" | "float" | "double";
 
 function isUnsigned(ctype: CType): boolean {
-  return ctype === "uchar" || ctype === "uint";
+  return ctype === "uchar" || ctype === "ushort" || ctype === "uint";
 }
 
 function wasmTypeFor(ctype: CType): number {
@@ -46,6 +46,7 @@ function blockTypeFor(ctype: CType): number {
 function sizeOfType(ctype: CType): number {
   switch (ctype) {
     case "char": case "uchar": return 1;
+    case "short": case "ushort": return 2;
     case "int": case "uint": case "float": return 4;
     case "long": case "double": return 8;
     case "void": return 0;
@@ -95,6 +96,7 @@ type StructDef = { name: string; fields: StructFieldInfo[]; size: number };
 function typeSpecToCType(ts: TypeSpecifier): CType {
   if (ts === "unsigned int") return "uint";
   if (ts === "unsigned char") return "uchar";
+  if (ts === "unsigned short") return "ushort";
   if (typeof ts === "string") return ts as CType;
   // struct/union type specifier used as pointer type → i32
   return "int";
@@ -557,7 +559,7 @@ function buildGlobalSectionWithHeap(globals: GlobalVariableDeclaration[], includ
   for (const g of globals) {
     const ctype = typeSpecToCType(g.typeSpec || "int");
     const wt = wasmTypeFor(ctype);
-    content.push(wt, 0x01); // mutable
+    content.push(wt, g.isConst ? 0x00 : 0x01); // 0x00 = immutable, 0x01 = mutable
     const val = evalConstExpr(g.initializer);
     if (ctype === "long") {
       content.push(Op.I64_CONST, ...encodeSignedLEB128_i64(val ?? 0), Op.END);
@@ -581,8 +583,10 @@ function buildGlobalSectionWithHeap(globals: GlobalVariableDeclaration[], includ
 
 function buildExportSection(funcs: FunctionDeclaration[], importCount: number): number[] {
   const entries: number[] = [];
-  let exportCount = funcs.length;
+  let exportCount = 0;
   for (let i = 0; i < funcs.length; i++) {
+    if (funcs[i].isStatic) continue;
+    exportCount++;
     entries.push(
       ...encodeName(funcs[i].name),
       ExportKind.FUNC,
@@ -1457,6 +1461,12 @@ function emitMemLoad(out: number[], ctype: CType): void {
     case "char": case "uchar":
       out.push(Op.I32_LOAD8_S, 0x00, 0x00);
       break;
+    case "short":
+      out.push(Op.I32_LOAD16_S, 0x01, 0x00);
+      break;
+    case "ushort":
+      out.push(Op.I32_LOAD16_U, 0x01, 0x00);
+      break;
     case "long":
       out.push(Op.I64_LOAD, 0x03, 0x00);
       break;
@@ -1476,6 +1486,9 @@ function emitMemStore(out: number[], ctype: CType): void {
   switch (ctype) {
     case "char": case "uchar":
       out.push(Op.I32_STORE8, 0x00, 0x00);
+      break;
+    case "short": case "ushort":
+      out.push(Op.I32_STORE16, 0x01, 0x00);
       break;
     case "long":
       out.push(Op.I64_STORE, 0x03, 0x00);

@@ -164,7 +164,10 @@ export const Op = {
   I32_LOAD: 0x28,
   I32_STORE: 0x36,
   I32_LOAD8_S: 0x2c,
+  I32_LOAD16_S: 0x2e,
+  I32_LOAD16_U: 0x2f,
   I32_STORE8: 0x3a,
+  I32_STORE16: 0x3b,
 
   // Memory (i64)
   I64_LOAD: 0x29,

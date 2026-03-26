@@ -622,4 +622,38 @@ describe("lexer", () => {
       expect(tokens[0].value).toBe(".5");
     });
   });
+
+  describe("short, const, volatile, storage classes (milestone 20)", () => {
+    it("tokenizes short keyword", () => {
+      expect(tokenize("short x;")[0].type).toBe(TokenType.SHORT);
+    });
+
+    it("tokenizes signed keyword", () => {
+      expect(tokenize("signed int x;")[0].type).toBe(TokenType.SIGNED);
+    });
+
+    it("tokenizes const keyword", () => {
+      expect(tokenize("const int x;")[0].type).toBe(TokenType.CONST);
+    });
+
+    it("tokenizes volatile keyword", () => {
+      expect(tokenize("volatile int x;")[0].type).toBe(TokenType.VOLATILE);
+    });
+
+    it("tokenizes static keyword", () => {
+      expect(tokenize("static int x;")[0].type).toBe(TokenType.STATIC);
+    });
+
+    it("tokenizes register keyword", () => {
+      expect(tokenize("register int x;")[0].type).toBe(TokenType.REGISTER);
+    });
+
+    it("tokenizes auto keyword", () => {
+      expect(tokenize("auto int x;")[0].type).toBe(TokenType.AUTO);
+    });
+
+    it("tokenizes extern keyword", () => {
+      expect(tokenize("extern int x;")[0].type).toBe(TokenType.EXTERN);
+    });
+  });
 });

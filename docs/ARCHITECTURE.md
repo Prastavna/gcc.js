@@ -185,6 +185,7 @@ Variables are analyzed per-function:
 | C type | WASM local type | Memory ops | sizeof |
 |--------|----------------|------------|--------|
 | `char` / `unsigned char` | i32 | `i32.load8_s` / `i32.store8` | 1 |
+| `short` / `unsigned short` | i32 | `i32.load16_s` / `i32.store16` | 2 |
 | `int` / `unsigned int` | i32 | `i32.load` / `i32.store` | 4 |
 | `float` | f32 | `f32.load` / `f32.store` | 4 |
 | `long` | i64 | `i64.load` / `i64.store` | 8 |

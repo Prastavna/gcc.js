@@ -238,8 +238,14 @@ describe("parser", () => {
       expect(fn.body[1].type).toBe("ExpressionStatement");
     });
 
-    it("throws on declaration without initializer", () => {
-      expect(() => parseSource("int main() { int x; return x; }")).toThrow();
+    it("parses uninitialized declaration with zero default", () => {
+      const ast = parseSource("int main() { int x; return x; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const decl = func.body[0] as any;
+      expect(decl.type).toBe("VariableDeclaration");
+      expect(decl.name).toBe("x");
+      expect(decl.initializer.type).toBe("IntegerLiteral");
+      expect(decl.initializer.value).toBe(0);
     });
   });
 
@@ -739,6 +745,79 @@ describe("parser", () => {
       expect(func.returnType).toBe("float");
       expect(func.params[0].typeSpec).toBe("float");
       expect(func.params[1].typeSpec).toBe("float");
+    });
+  });
+
+  describe("short, const, volatile, storage classes (milestone 20)", () => {
+    it("parses short type specifier", () => {
+      const ast = parseSource("int main() { short x = 5; return 0; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const decl = func.body[0] as any;
+      expect(decl.type).toBe("VariableDeclaration");
+      expect(decl.typeSpec).toBe("short");
+    });
+
+    it("parses unsigned short type specifier", () => {
+      const ast = parseSource("int main() { unsigned short x = 5; return 0; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const decl = func.body[0] as any;
+      expect(decl.typeSpec).toBe("unsigned short");
+    });
+
+    it("parses signed int as int", () => {
+      const ast = parseSource("int main() { signed int x = 5; return 0; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const decl = func.body[0] as any;
+      expect(decl.typeSpec).toBe("int");
+    });
+
+    it("parses signed char as char", () => {
+      const ast = parseSource("int main() { signed char x = 65; return 0; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const decl = func.body[0] as any;
+      expect(decl.typeSpec).toBe("char");
+    });
+
+    it("parses const volatile qualifiers", () => {
+      const ast = parseSource("int main() { const volatile int x = 42; return x; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const decl = func.body[0] as any;
+      expect(decl.type).toBe("VariableDeclaration");
+      expect(decl.typeSpec).toBe("int");
+    });
+
+    it("parses register qualifier", () => {
+      const ast = parseSource("int main() { register int i = 0; return i; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      expect(func.body[0].type).toBe("VariableDeclaration");
+    });
+
+    it("parses static function declaration", () => {
+      const ast = parseSource("static int helper() { return 1; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      expect(func.isStatic).toBe(true);
+    });
+
+    it("parses const global variable", () => {
+      const ast = parseSource("const int MAX = 100; int main() { return MAX; }");
+      const g = ast.declarations[0] as any;
+      expect(g.type).toBe("GlobalVariableDeclaration");
+      expect(g.isConst).toBe(true);
+    });
+
+    it("parses extern variable declaration", () => {
+      const ast = parseSource("extern int x; int main() { return 0; }");
+      expect(ast.declarations).toHaveLength(1); // extern skipped
+      expect(ast.declarations[0].type).toBe("FunctionDeclaration");
+    });
+
+    it("parses uninitialized variable with zero default", () => {
+      const ast = parseSource("int main() { short s; return 0; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const decl = func.body[0] as any;
+      expect(decl.type).toBe("VariableDeclaration");
+      expect(decl.typeSpec).toBe("short");
+      expect(decl.initializer.value).toBe(0);
     });
   });
 });

@@ -46,9 +46,34 @@ export function parse(tokens: Token[]): Program {
     return tok;
   }
 
+  function isQualifierOrStorage(t: TokenType): boolean {
+    return t === TokenType.CONST || t === TokenType.VOLATILE || t === TokenType.STATIC || t === TokenType.EXTERN || t === TokenType.REGISTER || t === TokenType.AUTO;
+  }
+
+  interface DeclQualifiers {
+    isConst: boolean;
+    isStatic: boolean;
+    isExtern: boolean;
+  }
+
+  function consumeQualifiers(): DeclQualifiers {
+    const q: DeclQualifiers = { isConst: false, isStatic: false, isExtern: false };
+    while (true) {
+      const t = current().type;
+      if (t === TokenType.CONST) { q.isConst = true; pos++; }
+      else if (t === TokenType.VOLATILE) { pos++; }
+      else if (t === TokenType.STATIC) { q.isStatic = true; pos++; }
+      else if (t === TokenType.EXTERN) { q.isExtern = true; pos++; }
+      else if (t === TokenType.REGISTER) { pos++; }
+      else if (t === TokenType.AUTO) { pos++; }
+      else break;
+    }
+    return q;
+  }
+
   function isTypeSpec(): boolean {
     const t = current().type;
-    if (t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG || t === TokenType.FLOAT || t === TokenType.DOUBLE || t === TokenType.STRUCT || t === TokenType.ENUM || t === TokenType.UNION || t === TokenType.UNSIGNED) return true;
+    if (t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.SHORT || t === TokenType.LONG || t === TokenType.FLOAT || t === TokenType.DOUBLE || t === TokenType.STRUCT || t === TokenType.ENUM || t === TokenType.UNION || t === TokenType.UNSIGNED || t === TokenType.SIGNED) return true;
     if (t === TokenType.IDENTIFIER && typedefs.has(current().value)) return true;
     return false;
   }
@@ -58,16 +83,20 @@ export function parse(tokens: Token[]): Program {
     const t = current().type;
     if (t === TokenType.STRUCT || t === TokenType.UNION) return 2; // struct/union Name
     if (t === TokenType.ENUM) {
-      // enum Name or just enum (when used as type spec before a name)
       if (peek(1).type === TokenType.IDENTIFIER) return 2;
       return 1;
     }
     if (t === TokenType.UNSIGNED) {
-      // unsigned int, unsigned char, or just unsigned
-      if (peek(1).type === TokenType.INT || peek(1).type === TokenType.CHAR) return 2;
+      const next = peek(1).type;
+      if (next === TokenType.INT || next === TokenType.CHAR || next === TokenType.SHORT) return 2;
       return 1;
     }
-    return 1; // int, void, char, long, typedef name
+    if (t === TokenType.SIGNED) {
+      const next = peek(1).type;
+      if (next === TokenType.CHAR || next === TokenType.SHORT || next === TokenType.INT || next === TokenType.LONG) return 2;
+      return 1; // signed alone = int
+    }
+    return 1; // int, void, char, short, long, float, double, typedef name
   }
 
   function parseTypeSpec(): TypeSpecifier {
@@ -78,9 +107,19 @@ export function parse(tokens: Token[]): Program {
     if (tok.type === TokenType.LONG) { pos++; return "long"; }
     if (tok.type === TokenType.FLOAT) { pos++; return "float"; }
     if (tok.type === TokenType.DOUBLE) { pos++; return "double"; }
+    if (tok.type === TokenType.SHORT) { pos++; return "short"; }
+    if (tok.type === TokenType.SIGNED) {
+      pos++;
+      if (current().type === TokenType.CHAR) { pos++; return "char"; }
+      if (current().type === TokenType.SHORT) { pos++; return "short"; }
+      if (current().type === TokenType.INT) { pos++; return "int"; }
+      if (current().type === TokenType.LONG) { pos++; return "long"; }
+      return "int"; // signed alone = int
+    }
     if (tok.type === TokenType.UNSIGNED) {
       pos++;
       if (current().type === TokenType.CHAR) { pos++; return "unsigned char"; }
+      if (current().type === TokenType.SHORT) { pos++; return "unsigned short"; }
       if (current().type === TokenType.INT) { pos++; }
       return "unsigned int";
     }
@@ -504,7 +543,7 @@ export function parse(tokens: Token[]): Program {
   /** Check if position has a type specifier token */
   function isTypeSpecAtPos(p: number): boolean {
     const t = tokens[p].type;
-    if (t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG || t === TokenType.FLOAT || t === TokenType.DOUBLE || t === TokenType.STRUCT || t === TokenType.ENUM || t === TokenType.UNION || t === TokenType.UNSIGNED) return true;
+    if (t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.SHORT || t === TokenType.LONG || t === TokenType.FLOAT || t === TokenType.DOUBLE || t === TokenType.STRUCT || t === TokenType.ENUM || t === TokenType.UNION || t === TokenType.UNSIGNED || t === TokenType.SIGNED) return true;
     if (t === TokenType.IDENTIFIER && typedefs.has(tokens[p].value)) return true;
     return false;
   }
@@ -517,14 +556,15 @@ export function parse(tokens: Token[]): Program {
       // (struct Name) or (union Name) — 4 tokens
       return peek(2).type === TokenType.IDENTIFIER && peek(3).type === TokenType.RPAREN;
     }
-    if (t === TokenType.UNSIGNED) {
-      // (unsigned int) or (unsigned char) or just (unsigned)
+    if (t === TokenType.UNSIGNED || t === TokenType.SIGNED) {
+      // (unsigned), (unsigned int), (unsigned char), (unsigned short)
+      // (signed), (signed int), (signed char), (signed short), (signed long)
       if (peek(2).type === TokenType.RPAREN) return true;
-      if ((peek(2).type === TokenType.INT || peek(2).type === TokenType.CHAR) && peek(3).type === TokenType.RPAREN) return true;
+      if ((peek(2).type === TokenType.INT || peek(2).type === TokenType.CHAR || peek(2).type === TokenType.SHORT || peek(2).type === TokenType.LONG) && peek(3).type === TokenType.RPAREN) return true;
       return false;
     }
-    // Simple type: (int), (char), (long), (void), or (typedef_name)
-    return peek(2).type === TokenType.RPAREN;
+    // Simple type: (int), (char), (short), (long), (float), (double), (void), or (typedef_name)
+    return isTypeSpecAtPos(pos + 1) && peek(2).type === TokenType.RPAREN;
   }
 
   // ── Statement parsing ─────────────────────────────────
@@ -544,6 +584,12 @@ export function parse(tokens: Token[]): Program {
   }
 
   function parseStatement(): Statement {
+    // Consume qualifiers/storage classes before declarations
+    if (isQualifierOrStorage(current().type)) {
+      consumeQualifiers(); // qualifiers consumed and discarded at local scope
+      // After consuming qualifiers, must be a declaration — fall through to detection below
+    }
+
     // Struct variable declaration: struct Name varname;
     if (
       current().type === TokenType.STRUCT &&
@@ -659,10 +705,31 @@ export function parse(tokens: Token[]): Program {
       peek(typeSpecLength() + 1).type === TokenType.EQUALS
     ) {
       const typeSpec = parseTypeSpec();
+      // Consume any post-type qualifiers like `int const x = ...`
+      while (isQualifierOrStorage(current().type)) pos++;
       const name = expect(TokenType.IDENTIFIER, "variable name").value;
       expect(TokenType.EQUALS, "'=' in variable declaration");
       const initializer = parseExpression();
       expect(TokenType.SEMICOLON, "';' after variable declaration");
+      return { type: "VariableDeclaration", name, typeSpec, initializer };
+    }
+
+    // Uninitialized variable declaration: int x;
+    if (
+      isTypeSpec() &&
+      peek(typeSpecLength()).type === TokenType.IDENTIFIER &&
+      peek(typeSpecLength() + 1).type === TokenType.SEMICOLON
+    ) {
+      const typeSpec = parseTypeSpec();
+      while (isQualifierOrStorage(current().type)) pos++;
+      const name = expect(TokenType.IDENTIFIER, "variable name").value;
+      expect(TokenType.SEMICOLON, "';' after variable declaration");
+      // Synthesize a zero initializer
+      const initializer: Expression = (typeSpec === "float")
+        ? { type: "FloatingLiteral", value: 0, isFloat: true }
+        : (typeSpec === "double")
+        ? { type: "FloatingLiteral", value: 0, isFloat: false }
+        : { type: "IntegerLiteral", value: 0 };
       return { type: "VariableDeclaration", name, typeSpec, initializer };
     }
 
@@ -923,6 +990,9 @@ export function parse(tokens: Token[]): Program {
 
   /** Parse a top-level declaration: function, extern, global variable, struct, enum, union, typedef */
   function parseTopLevelDecl(): Declaration | null {
+    // Consume leading qualifiers/storage classes
+    const quals = consumeQualifiers();
+
     // Struct definition: struct Name { ... };
     if (current().type === TokenType.STRUCT && peek(1).type === TokenType.IDENTIFIER && peek(2).type === TokenType.LBRACE) {
       return parseStructDeclaration();
@@ -955,7 +1025,16 @@ export function parse(tokens: Token[]): Program {
       pos++; // skip =
       const initializer = parseExpression();
       expect(TokenType.SEMICOLON, "';' after global variable declaration");
-      return { type: "GlobalVariableDeclaration", name, typeSpec, initializer };
+      return { type: "GlobalVariableDeclaration", name, typeSpec, initializer, isStatic: quals.isStatic || undefined, isConst: quals.isConst || undefined };
+    }
+
+    // Extern variable or uninitialized global: type ident;
+    if (current().type === TokenType.SEMICOLON) {
+      pos++;
+      if (quals.isExtern) return null; // extern variable declaration — skip
+      // Uninitialized global variable
+      const initializer: Expression = { type: "IntegerLiteral", value: 0 };
+      return { type: "GlobalVariableDeclaration", name, typeSpec, initializer, isStatic: quals.isStatic || undefined, isConst: quals.isConst || undefined };
     }
 
     // Function or extern: type ident(...)
@@ -975,7 +1054,7 @@ export function parse(tokens: Token[]): Program {
       body.push(parseStatement());
     }
     expect(TokenType.RBRACE, "'}'");
-    return { type: "FunctionDeclaration", name, returnType: typeSpec, params, body };
+    return { type: "FunctionDeclaration", name, returnType: typeSpec, params, body, isStatic: quals.isStatic || undefined };
   }
 
   function parseProgram(): Program {

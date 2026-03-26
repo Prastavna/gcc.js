@@ -149,6 +149,14 @@ const examples: { label: string; code: string }[] = [
     label: 'Mixed int/float',
     code: `int main() {\n    int a = 7;\n    double b = 3.14;\n    float f = 1.5f;\n    return (int)(a + b + (double)f);\n}`,
   },
+  {
+    label: 'Short type',
+    code: `short add_short(short a, short b) {\n    return a + b;\n}\n\nint main() {\n    short s = 10;\n    return add_short(s, (short)5);\n}`,
+  },
+  {
+    label: 'Const & static',
+    code: `const int MAX = 100;\nstatic int helper() { return 42; }\n\nint main() {\n    const volatile int x = helper();\n    return x + MAX;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

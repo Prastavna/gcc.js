@@ -305,7 +305,7 @@ int main() {
 - [x] `unsigned int` and `unsigned char` types
 - [x] Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`)
 
-### Milestone 17: Complete program target
+### Milestone 17: Complete program target [DONE]
 ```c
 int printf(int ptr);
 
@@ -348,7 +348,7 @@ int main() {
 
 ## Phase 3: Full C89 Coverage
 
-### Milestone 18: do-while, goto, comma operator
+### Milestone 18: do-while, goto, comma operator [DONE]
 ```c
 int main() {
     int i = 0;
@@ -368,7 +368,7 @@ done:
 - [x] Comma operator (`(a, b, c)` — evaluates all, returns last)
 - [x] `goto` and labels (`goto done; ... done:`)
 
-### Milestone 19: Floating point
+### Milestone 19: Floating point [DONE]
 ```c
 double sqrt_approx(double x) {
     double guess = x / 2.0;
@@ -394,7 +394,7 @@ int main() {
 - [x] `sizeof(float)` = 4, `sizeof(double)` = 8
 - [x] FP function parameters and return types
 
-### Milestone 20: short, const, volatile, storage classes
+### Milestone 20: short, const, volatile, storage classes [DONE]
 ```c
 const int MAX = 100;
 static int counter = 0;
@@ -410,15 +410,15 @@ int main() {
     return add_short(s, (short)5) + MAX;
 }
 ```
-- [ ] `short` type (16-bit signed, WASM i32, memory: i32.load16_s / i32.store16)
-- [ ] `unsigned short` type
-- [ ] `signed` keyword (explicit: `signed char`, `signed int`)
-- [ ] `const` qualifier (parsed and accepted, enforced at parse/compile time)
-- [ ] `volatile` qualifier (parsed and accepted, no-op for WASM)
-- [ ] `static` storage class (file-scope linkage — not exported)
-- [ ] `extern` storage class (declaration without definition)
-- [ ] `register` storage class (parsed and accepted, hint only)
-- [ ] `auto` storage class (parsed and accepted, default for locals)
+- [x] `short` type (16-bit signed, WASM i32, memory: i32.load16_s / i32.store16)
+- [x] `unsigned short` type
+- [x] `signed` keyword (explicit: `signed char`, `signed int`)
+- [x] `const` qualifier (parsed and accepted, enforced at parse/compile time)
+- [x] `volatile` qualifier (parsed and accepted, no-op for WASM)
+- [x] `static` storage class (file-scope linkage — not exported)
+- [x] `extern` storage class (declaration without definition)
+- [x] `register` storage class (parsed and accepted, hint only)
+- [x] `auto` storage class (parsed and accepted, default for locals)
 
 ### Milestone 21: Advanced preprocessor
 ```c

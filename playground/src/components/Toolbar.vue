@@ -1,11 +1,13 @@
 <script setup lang="ts">
 defineProps<{
   compiling: boolean
+  downloadable: boolean
 }>()
 
 const emit = defineEmits<{
   compile: []
   example: [code: string]
+  download: []
 }>()
 
 const examples: { label: string; code: string }[] = [
@@ -201,6 +203,15 @@ import { ref } from 'vue'
           </button>
         </div>
       </div>
+
+      <!-- Download button -->
+      <button
+        v-if="downloadable"
+        class="rounded border border-[var(--color-border)] bg-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-colors cursor-pointer"
+        @click="emit('download')"
+      >
+        Download .wasm
+      </button>
 
       <!-- Compile button -->
       <button

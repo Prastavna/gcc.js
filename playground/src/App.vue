@@ -11,6 +11,7 @@ const DEFAULT_CODE = `int main() {\n    return 42;\n}`
 const code = ref(DEFAULT_CODE)
 const output = ref<OutputEntry[]>([])
 const compiling = ref(false)
+const lastWasm = ref<Uint8Array | null>(null)
 
 function log(type: OutputEntry['type'], text: string) {
   output.value.push({ type, text, timestamp: Date.now() })
@@ -23,6 +24,7 @@ function clearOutput() {
 async function runCompile() {
   if (compiling.value) return
   compiling.value = true
+  lastWasm.value = null
   clearOutput()
 
   log('info', `Compiling ${code.value.split('\n').length} lines of C...`)
@@ -40,6 +42,7 @@ async function runCompile() {
       return
     }
 
+    lastWasm.value = result.wasm
     log('success', `Compiled successfully (${elapsed}ms, ${result.wasm.byteLength} bytes)`)
 
     // Instantiate with printf bridge
@@ -89,6 +92,19 @@ async function runCompile() {
   }
 }
 
+function downloadWasm() {
+  if (!lastWasm.value) return
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  const blob = new Blob([lastWasm.value.buffer as ArrayBuffer], { type: 'application/wasm' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `main-${ts}.wasm`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
 function onExample(exampleCode: string) {
   code.value = exampleCode
 }
@@ -107,7 +123,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 <template>
   <div class="flex h-screen flex-col">
     <!-- Top toolbar -->
-    <Toolbar :compiling="compiling" @compile="runCompile" @example="onExample" />
+    <Toolbar :compiling="compiling" :downloadable="lastWasm !== null" @compile="runCompile" @example="onExample" @download="downloadWasm" />
 
     <!-- Main split pane -->
     <div class="flex flex-1 overflow-hidden">

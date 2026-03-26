@@ -346,6 +346,283 @@ int main() {
 
 ---
 
+## Phase 3: Full C89 Coverage
+
+### Milestone 18: do-while, goto, comma operator
+```c
+int main() {
+    int i = 0;
+    do {
+        i = i + 1;
+    } while (i < 5);
+
+    int x = (1, 2, 3);
+
+    goto done;
+    i = 999;
+done:
+    return i + x;
+}
+```
+- [ ] `do { ... } while (cond);` loop
+- [ ] Comma operator (`(a, b, c)` — evaluates all, returns last)
+- [ ] `goto` and labels (`goto done; ... done:`)
+
+### Milestone 19: Floating point
+```c
+double sqrt_approx(double x) {
+    double guess = x / 2.0;
+    for (int i = 0; i < 20; i = i + 1) {
+        guess = (guess + x / guess) / 2.0;
+    }
+    return guess;
+}
+
+int main() {
+    float f = 3.14f;
+    double d = 2.718281828;
+    return (int)(f + (float)d);
+}
+```
+- [ ] `float` type (WASM `f32`)
+- [ ] `double` type (WASM `f64`)
+- [ ] Floating-point literals (`3.14`, `3.14f`)
+- [ ] FP arithmetic (`+`, `-`, `*`, `/`)
+- [ ] FP comparisons (`<`, `>`, `<=`, `>=`, `==`, `!=`)
+- [ ] Casts between int/float/double (`(int)3.14`, `(double)42`)
+- [ ] Implicit promotion in mixed expressions (int+double → double)
+- [ ] `sizeof(float)` = 4, `sizeof(double)` = 8
+- [ ] FP function parameters and return types
+
+### Milestone 20: short, const, volatile, storage classes
+```c
+const int MAX = 100;
+static int counter = 0;
+
+short add_short(short a, short b) {
+    return a + b;
+}
+
+int main() {
+    register int i;
+    const volatile int x = 42;
+    short s = 10;
+    return add_short(s, (short)5) + MAX;
+}
+```
+- [ ] `short` type (16-bit signed, WASM i32, memory: i32.load16_s / i32.store16)
+- [ ] `unsigned short` type
+- [ ] `signed` keyword (explicit: `signed char`, `signed int`)
+- [ ] `const` qualifier (parsed and accepted, enforced at parse/compile time)
+- [ ] `volatile` qualifier (parsed and accepted, no-op for WASM)
+- [ ] `static` storage class (file-scope linkage — not exported)
+- [ ] `extern` storage class (declaration without definition)
+- [ ] `register` storage class (parsed and accepted, hint only)
+- [ ] `auto` storage class (parsed and accepted, default for locals)
+
+### Milestone 21: Advanced preprocessor
+```c
+#if defined(DEBUG) && (VERSION > 2)
+int get_value() { return 42; }
+#elif VERSION == 1
+int get_value() { return 0; }
+#else
+int get_value() { return -1; }
+#endif
+
+#define STRINGIFY(x) #x
+#define CONCAT(a, b) a##b
+
+int main() {
+    return get_value();
+}
+```
+- [ ] `#if` with constant expressions (arithmetic, comparisons, logical)
+- [ ] `#elif` with constant expressions
+- [ ] `defined(NAME)` operator inside `#if` / `#elif`
+- [ ] `#error "message"` directive
+- [ ] Stringification operator (`#param` in function-like macros)
+- [ ] Token pasting operator (`a##b` in function-like macros)
+- [ ] `#line` directive (update reported line numbers)
+- [ ] `#pragma` (parsed and ignored)
+
+### Milestone 22: Forward declarations and function pointers
+```c
+// Forward declarations
+int bar(int x);
+int foo(int x) { return x > 0 ? bar(x - 1) : 0; }
+int bar(int x) { return x + foo(x - 1); }
+
+// Function pointers
+int add(int a, int b) { return a + b; }
+int mul(int a, int b) { return a * b; }
+
+int apply(int (*op)(int, int), int x, int y) {
+    return op(x, y);
+}
+
+int main() {
+    int (*fn)(int, int) = add;
+    int result = apply(fn, 3, 4);
+    fn = mul;
+    return result + fn(5, 6);
+}
+```
+- [ ] Forward function declarations (`int foo(int);` before definition)
+- [ ] Function pointer types (`int (*fp)(int, int)`)
+- [ ] Function pointer variables and assignment
+- [ ] Calling through function pointers (`fp(args)`)
+- [ ] Function pointers as parameters
+- [ ] WASM `call_indirect` and table section for indirect calls
+- [ ] `typedef` for function pointer types
+
+### Milestone 23: Multi-dimensional arrays and advanced arrays
+```c
+int main() {
+    int matrix[3][4];
+    for (int i = 0; i < 3; i = i + 1) {
+        for (int j = 0; j < 4; j = j + 1) {
+            matrix[i][j] = i * 4 + j;
+        }
+    }
+
+    char name[] = "hello";
+
+    struct Point { int x; int y; };
+    struct Point pts[3] = {{1, 2}, {3, 4}, {5, 6}};
+
+    int *p = matrix[1];
+    return matrix[2][3] + name[0] + pts[1].x;
+}
+```
+- [ ] Multi-dimensional arrays (`int a[3][4]`)
+- [ ] Array of structs (`struct Point pts[10]`)
+- [ ] `char[]` initialized from string literal (`char s[] = "hello"`)
+- [ ] Array decay to pointer (`int *p = arr`)
+- [ ] Pointer arithmetic (`p + n`, `p - n`, `p1 - p2`)
+- [ ] Row access on 2D arrays (`matrix[i]` decays to `int *`)
+- [ ] Nested initializer lists (`{{1, 2}, {3, 4}}`)
+
+### Milestone 24: Struct and union enhancements
+```c
+struct Line {
+    struct Point { int x; int y; } start;
+    struct Point end;
+};
+
+int main() {
+    struct Line ln;
+    ln.start.x = 1;
+    ln.start.y = 2;
+    ln.end.x = 3;
+    ln.end.y = 4;
+
+    struct Line ln2 = ln;
+    ln2.start.x = 99;
+
+    return ln.start.x + ln2.start.x;
+}
+```
+- [ ] Nested struct definitions (`struct A { struct B { ... } b; }`)
+- [ ] Nested member access (`a.b.x`, `a->b.x`)
+- [ ] Struct assignment (copy by value: `a = b`)
+- [ ] Struct initializer lists (`struct Point p = {1, 2}`)
+- [ ] Struct return from functions (`struct Point make_point(int x, int y)`)
+- [ ] Anonymous structs/unions inside other structs
+- [ ] Bitfield declarations (`int x : 4;`)
+
+### Milestone 25: void pointers and variadic functions
+```c
+void *memcpy(void *dest, void *src, int n) {
+    char *d = (char *)dest;
+    char *s = (char *)src;
+    for (int i = 0; i < n; i = i + 1) {
+        d[i] = s[i];
+    }
+    return dest;
+}
+
+int sum(int count, ...) {
+    // simplified variadic — uses stack-based va_list
+    int total = 0;
+    va_list args;
+    va_start(args, count);
+    for (int i = 0; i < count; i = i + 1) {
+        total = total + va_arg(args, int);
+    }
+    va_end(args);
+    return total;
+}
+
+int main() {
+    int a = 10, b = 20;
+    void *p = &a;
+    memcpy(&b, &a, sizeof(int));
+    return b + sum(3, 1, 2, 3);
+}
+```
+- [ ] `void *` type (generic pointer, implicit cast to/from any pointer)
+- [ ] Casting between `void *` and typed pointers
+- [ ] `void *` function parameters and return types
+- [ ] Variadic function declarations (`int printf(char *fmt, ...)`)
+- [ ] `va_list`, `va_start`, `va_arg`, `va_end` (built-in macros/types)
+- [ ] Multiple declarators in one statement (`int a = 10, b = 20;`)
+
+### Milestone 26: C89 graduation test
+```c
+#include "stdlib.h"
+
+typedef struct {
+    float x, y;
+} Vec2;
+
+typedef struct Node {
+    Vec2 pos;
+    struct Node *next;
+} Node;
+
+static Node *insert_sorted(Node *head, Vec2 v) {
+    Node *n = (Node *)malloc(sizeof(Node));
+    n->pos = v;
+    n->next = 0;
+    if (head == 0 || v.x < head->pos.x) {
+        n->next = head;
+        return n;
+    }
+    Node *cur = head;
+    while (cur->next != 0 && cur->next->pos.x < v.x) {
+        cur = cur->next;
+    }
+    n->next = cur->next;
+    cur->next = n;
+    return head;
+}
+
+int main() {
+    Node *list = 0;
+    float coords[] = {3.0f, 1.0f, 4.0f, 1.0f, 5.0f, 9.0f};
+    for (int i = 0; i < 6; i = i + 2) {
+        Vec2 v;
+        v.x = coords[i];
+        v.y = coords[i + 1];
+        list = insert_sorted(list, v);
+    }
+    // sum the sorted x coords: 1.0 + 3.0 + 4.0 + 5.0 = 13.0 → truncate to 13
+    float sum = 0.0f;
+    Node *cur = list;
+    while (cur != 0) {
+        sum = sum + cur->pos.x;
+        cur = cur->next;
+    }
+    return (int)sum;
+}
+```
+- [ ] **Target**: a non-trivial program using floats, structs, pointers, malloc, typedef, static
+- [ ] Validates: the full C89 subset working together as a coherent language
+- [ ] This is the C89 "graduation" test for the compiler
+
+---
+
 ## Technical Stack
 
 | Tool       | Purpose              |

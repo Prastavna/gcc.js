@@ -76,9 +76,11 @@ export const Section = {
   TYPE: 0x01,
   IMPORT: 0x02,
   FUNCTION: 0x03,
+  TABLE: 0x04,
   MEMORY: 0x05,
   GLOBAL: 0x06,
   EXPORT: 0x07,
+  ELEMENT: 0x09,
   CODE: 0x0a,
   DATA: 0x0b,
 } as const;
@@ -104,6 +106,7 @@ export const Op = {
   BR_TABLE: 0x0e,
   RETURN: 0x0f,
   CALL: 0x10,
+  CALL_INDIRECT: 0x11,
 
   // Parametric
   DROP: 0x1a,

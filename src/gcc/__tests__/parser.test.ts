@@ -820,4 +820,51 @@ describe("parser", () => {
       expect(decl.initializer.value).toBe(0);
     });
   });
+
+  // ── Milestone 22: Forward declarations and function pointers ──
+
+  describe("forward declarations and function pointers", () => {
+    it("parses forward declaration as ForwardDeclaration", () => {
+      const ast = parseSource("int foo(int x); int foo(int x) { return x; }");
+      expect(ast.declarations[0].type).toBe("ForwardDeclaration");
+      expect(ast.declarations[1].type).toBe("FunctionDeclaration");
+    });
+
+    it("parses extern function as ExternFunctionDeclaration", () => {
+      const ast = parseSource("extern int printf(int ptr);");
+      expect(ast.declarations[0].type).toBe("ExternFunctionDeclaration");
+    });
+
+    it("parses function pointer variable declaration", () => {
+      const ast = parseSource("int add(int a, int b) { return a + b; } int main() { int (*fn)(int, int) = add; return fn(1, 2); }");
+      const main = ast.declarations[1] as FunctionDeclaration;
+      const decl = main.body[0] as any;
+      expect(decl.type).toBe("VariableDeclaration");
+      expect(decl.typeSpec).toEqual({ kind: "functionPointer", returnType: "int", paramTypes: ["int", "int"] });
+    });
+
+    it("parses function pointer parameter", () => {
+      const ast = parseSource("int apply(int (*op)(int, int), int x) { return op(x, x); }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      expect(func.params[0].typeSpec).toEqual({ kind: "functionPointer", returnType: "int", paramTypes: ["int", "int"] });
+      expect(func.params[0].name).toBe("op");
+    });
+
+    it("parses typedef for function pointer", () => {
+      const ast = parseSource("typedef int (*BinOp)(int, int); int add(int a, int b) { return a + b; } int main() { BinOp fn = add; return fn(1, 2); }");
+      const main = ast.declarations[1] as FunctionDeclaration;
+      const decl = main.body[0] as any;
+      expect(decl.type).toBe("VariableDeclaration");
+      expect(decl.typeSpec).toEqual({ kind: "functionPointer", returnType: "int", paramTypes: ["int", "int"] });
+    });
+
+    it("marks indirect calls on function pointer variables", () => {
+      const ast = parseSource("int add(int a, int b) { return a + b; } int main() { int (*fn)(int, int) = add; return fn(1, 2); }");
+      const main = ast.declarations[1] as FunctionDeclaration;
+      const ret = main.body[1] as any;
+      const call = ret.expression as CallExpression;
+      expect(call.indirect).toBe(true);
+      expect(call.callee).toBe("fn");
+    });
+  });
 });

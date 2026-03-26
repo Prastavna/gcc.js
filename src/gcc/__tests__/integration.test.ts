@@ -3294,4 +3294,116 @@ describe("integration: compile() end-to-end", () => {
       expect(result.ok).toBe(false);
     });
   });
+
+  // ── Milestone 22: Forward declarations and function pointers ──
+
+  describe("milestone 22: forward declarations and function pointers", () => {
+    it("forward declaration allows mutual recursion", async () => {
+      const source = `
+        int bar(int x);
+        int foo(int x) { return x > 0 ? bar(x - 1) : 0; }
+        int bar(int x) { return x + foo(x - 1); }
+
+        int main() { return foo(3); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(2);
+    });
+
+    it("forward declaration without matching definition acts as extern", () => {
+      // A prototype without a body and without a definition should be treated as extern import
+      const source = `
+        int printf(int ptr);
+        int main() { return 0; }
+      `;
+      const result = compile(source);
+      // Should compile (extern import for printf)
+      expect(result.ok).toBe(true);
+    });
+
+    it("function pointer variable — assign and call", async () => {
+      const source = `
+        int add(int a, int b) { return a + b; }
+
+        int main() {
+            int (*fn)(int, int) = add;
+            return fn(3, 4);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+
+    it("function pointer reassignment", async () => {
+      const source = `
+        int add(int a, int b) { return a + b; }
+        int mul(int a, int b) { return a * b; }
+
+        int main() {
+            int (*fn)(int, int) = add;
+            int a = fn(3, 4);
+            fn = mul;
+            int b = fn(5, 6);
+            return a + b;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(37);
+    });
+
+    it("function pointer as parameter", async () => {
+      const source = `
+        int add(int a, int b) { return a + b; }
+
+        int apply(int (*op)(int, int), int x, int y) {
+            return op(x, y);
+        }
+
+        int main() {
+            return apply(add, 10, 20);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(30);
+    });
+
+    it("function pointer — full target program", async () => {
+      const source = `
+        int bar(int x);
+        int foo(int x) { return x > 0 ? bar(x - 1) : 0; }
+        int bar(int x) { return x + foo(x - 1); }
+
+        int add(int a, int b) { return a + b; }
+        int mul(int a, int b) { return a * b; }
+
+        int apply(int (*op)(int, int), int x, int y) {
+            return op(x, y);
+        }
+
+        int main() {
+            int (*fn)(int, int) = add;
+            int result = apply(fn, 3, 4);
+            fn = mul;
+            return result + fn(5, 6);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(37);
+    });
+
+    it("typedef for function pointer", async () => {
+      const source = `
+        typedef int (*BinOp)(int, int);
+
+        int add(int a, int b) { return a + b; }
+
+        int main() {
+            BinOp fn = add;
+            return fn(10, 20);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(30);
+    });
+  });
 });

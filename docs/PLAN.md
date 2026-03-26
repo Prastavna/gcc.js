@@ -446,7 +446,7 @@ int main() {
 - [x] `#line` directive (parsed and accepted)
 - [x] `#pragma` (parsed and ignored)
 
-### Milestone 22: Forward declarations and function pointers
+### Milestone 22: Forward declarations and function pointers [DONE]
 ```c
 // Forward declarations
 int bar(int x);
@@ -468,13 +468,13 @@ int main() {
     return result + fn(5, 6);
 }
 ```
-- [ ] Forward function declarations (`int foo(int);` before definition)
-- [ ] Function pointer types (`int (*fp)(int, int)`)
-- [ ] Function pointer variables and assignment
-- [ ] Calling through function pointers (`fp(args)`)
-- [ ] Function pointers as parameters
-- [ ] WASM `call_indirect` and table section for indirect calls
-- [ ] `typedef` for function pointer types
+- [x] Forward function declarations (`int foo(int);` before definition)
+- [x] Function pointer types (`int (*fp)(int, int)`)
+- [x] Function pointer variables and assignment
+- [x] Calling through function pointers (`fp(args)`)
+- [x] Function pointers as parameters
+- [x] WASM `call_indirect` and table section for indirect calls
+- [x] `typedef` for function pointer types
 
 ### Milestone 23: Multi-dimensional arrays and advanced arrays
 ```c

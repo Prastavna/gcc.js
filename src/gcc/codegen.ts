@@ -1,4 +1,4 @@
-import type { Program, FunctionDeclaration, ExternFunctionDeclaration, GlobalVariableDeclaration, StructDeclaration, UnionDeclaration, Statement, Expression, TypeSpecifier } from "./types.ts";
+import type { Program, FunctionDeclaration, ExternFunctionDeclaration, ForwardDeclaration, GlobalVariableDeclaration, StructDeclaration, UnionDeclaration, Statement, Expression, TypeSpecifier, FunctionPointerTypeSpecifier } from "./types.ts";
 import {
   WASM_MAGIC,
   WASM_VERSION,
@@ -138,6 +138,7 @@ let nextMemAddr = 0;
 let stringData: { addr: number; bytes: number[] }[] = [];
 let structDefs: Map<string, StructDef> = new Map();
 let mallocUsed = false;
+let tableUsed = false;
 let heapPtrGlobalIdx = 0;
 
 /**
@@ -153,16 +154,27 @@ export function generate(ast: Program): Uint8Array {
   // Separate declarations by kind
   const externs: ExternFunctionDeclaration[] = [];
   const funcs: FunctionDeclaration[] = [];
+  const forwards: ForwardDeclaration[] = [];
   const globals: GlobalVariableDeclaration[] = [];
   const structs: StructDeclaration[] = [];
   const unions: UnionDeclaration[] = [];
   for (const d of ast.declarations) {
     if (d.type === "ExternFunctionDeclaration") externs.push(d);
     else if (d.type === "FunctionDeclaration") funcs.push(d);
+    else if (d.type === "ForwardDeclaration") forwards.push(d);
     else if (d.type === "GlobalVariableDeclaration") globals.push(d);
     else if (d.type === "StructDeclaration") structs.push(d);
     else if (d.type === "UnionDeclaration") unions.push(d);
     // EnumDeclaration — no codegen needed (constants resolved at parse time)
+  }
+
+  // Resolve forward declarations: if no matching function definition exists, treat as extern import
+  const funcNames = new Set(funcs.map(f => f.name));
+  for (const fwd of forwards) {
+    if (!funcNames.has(fwd.name)) {
+      externs.push({ type: "ExternFunctionDeclaration", name: fwd.name, returnType: fwd.returnType, params: fwd.params });
+    }
+    // else: true forward declaration — function definition exists, skip
   }
 
   // Build struct layout registry
@@ -270,6 +282,26 @@ export function generate(ast: Program): Uint8Array {
     funcTypeIndices.push(getTypeIdx(paramTypes, retType));
   }
 
+  // Build function table for indirect calls (function pointers)
+  // Table index 0 is reserved (null), actual functions start at index 1
+  const funcTableIndex = new Map<string, number>();
+  const funcPtrTypeIndices = new Map<string, number>();
+  let tableIdx = 1; // 0 = null/invalid
+  for (const ext of externs) {
+    funcTableIndex.set(ext.name, tableIdx++);
+    const ptypes = ext.params.map(p => wasmTypeFor(typeSpecToCType(p.typeSpec || "int")));
+    const rtype = wasmTypeFor(typeSpecToCType(ext.returnType || "int"));
+    funcPtrTypeIndices.set(ext.name, getTypeIdx(ptypes, rtype));
+  }
+  for (const func of funcs) {
+    funcTableIndex.set(func.name, tableIdx++);
+    const ptypes = func.params.map(p => wasmTypeFor(typeSpecToCType(p.typeSpec || "int")));
+    const rtype = wasmTypeFor(typeSpecToCType(func.returnType || "int"));
+    funcPtrTypeIndices.set(func.name, getTypeIdx(ptypes, rtype));
+  }
+  const tableSize = tableIdx;
+  tableUsed = false;
+
   // Detect if memory is needed
   if (stringData.length > 0) memoryUsed = true;
   for (const func of funcs) {
@@ -280,18 +312,20 @@ export function generate(ast: Program): Uint8Array {
   heapPtrGlobalIdx = globals.length;
 
   // Build code section FIRST — it finalizes nextMemAddr and mallocUsed
-  const codeSection = buildCodeSection(funcs, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams);
+  const codeSection = buildCodeSection(funcs, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, funcTableIndex, funcPtrTypeIndices);
 
   // If malloc was used, we need memory and the heap pointer global
   if (mallocUsed) memoryUsed = true;
 
-  // Build remaining sections (WASM section ordering: 1,2,3,5,6,7,10,11)
+  // Build remaining sections (WASM section ordering: 1,2,3,4,5,6,7,9,10,11)
   const typeSection = buildTypeSection(typeSigs);
   const importSection = externs.length > 0 ? buildImportSection(externs, importTypeIndices) : [];
   const funcSection = buildFunctionSection(funcTypeIndices);
+  const tableSection = tableUsed ? buildTableSection(tableSize) : [];
   const memorySection = memoryUsed ? buildMemorySection() : [];
   const globalSection = (globals.length > 0 || mallocUsed) ? buildGlobalSectionWithHeap(globals, mallocUsed, nextMemAddr) : [];
   const exportSection = buildExportSection(funcs, importCount);
+  const elementSection = tableUsed ? buildElementSection(externs, funcs, funcIndex) : [];
   const dataSection = stringData.length > 0 ? buildDataSection() : [];
 
   const bytes: number[] = [
@@ -300,9 +334,11 @@ export function generate(ast: Program): Uint8Array {
     ...typeSection,
     ...importSection,
     ...funcSection,
+    ...tableSection,
     ...memorySection,
     ...globalSection,
     ...exportSection,
+    ...elementSection,
     ...codeSection,
     ...dataSection,
   ];
@@ -610,10 +646,12 @@ function buildCodeSection(
   funcReturnTypes: Map<string, CType>,
   funcParamTypes: Map<string, CType[]>,
   funcStructParams: Map<string, Map<number, string>>,
+  funcTableIndex: Map<string, number>,
+  funcPtrTypeIndices: Map<string, number>,
 ): number[] {
   const bodies: number[] = [];
   for (const func of funcs) {
-    bodies.push(...buildFunctionBody(func, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams));
+    bodies.push(...buildFunctionBody(func, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, funcTableIndex, funcPtrTypeIndices));
   }
   const content = [...encodeUnsignedLEB128(funcs.length), ...bodies];
   return makeSection(Section.CODE, content);
@@ -631,6 +669,45 @@ function buildDataSection(): number[] {
     );
   }
   return makeSection(Section.DATA, content);
+}
+
+/** Table section: declares a funcref table for indirect calls */
+function buildTableSection(tableSize: number): number[] {
+  // One table: funcref, min=tableSize, max=tableSize
+  const content: number[] = [
+    ...encodeUnsignedLEB128(1), // 1 table
+    0x70, // funcref
+    0x01, // has max
+    ...encodeUnsignedLEB128(tableSize),
+    ...encodeUnsignedLEB128(tableSize),
+  ];
+  return makeSection(Section.TABLE, content);
+}
+
+/** Element section: populates the table with function references */
+function buildElementSection(
+  externs: ExternFunctionDeclaration[],
+  funcs: FunctionDeclaration[],
+  funcIndex: Map<string, number>,
+): number[] {
+  // Active element segment: table 0, offset 1 (skip index 0 = null)
+  const funcIndices: number[] = [];
+  for (const ext of externs) {
+    funcIndices.push(funcIndex.get(ext.name)!);
+  }
+  for (const func of funcs) {
+    funcIndices.push(funcIndex.get(func.name)!);
+  }
+  const content: number[] = [
+    ...encodeUnsignedLEB128(1), // 1 element segment
+    0x00, // flags: active, table 0
+    Op.I32_CONST, ...encodeSignedLEB128(1), Op.END, // offset = 1
+    ...encodeUnsignedLEB128(funcIndices.length), // num elements
+  ];
+  for (const idx of funcIndices) {
+    content.push(...encodeUnsignedLEB128(idx));
+  }
+  return makeSection(Section.ELEMENT, content);
 }
 
 // ── Address-taken variable analysis ──────────────────────
@@ -727,6 +804,10 @@ type Ctx = {
   funcStructParams: Map<string, Map<number, string>>;
   varStructPtrTypes: Map<string, string>; // var name -> struct name for pointer-to-struct vars
   varPtrTypes: Map<string, CType>; // var name -> pointed-to element type for primitive pointer vars
+  funcTableIndex: Map<string, number>; // function name -> table index (for indirect calls)
+  funcPtrTypeIndices: Map<string, number>; // function name -> type index (for call_indirect)
+  funcPtrVarTypeIndices: Map<string, number>; // variable name -> type index for call_indirect
+  funcPtrVarReturnTypes: Map<string, CType>; // variable name -> return type
   breakDepth: number | null;  // BR depth for break (null = not in a loop/switch)
   continueDepth: number | null; // BR depth for continue (null = not in a loop)
   switchTmpIdx: number | null; // local index for switch temp variable
@@ -772,6 +853,8 @@ function buildFunctionBody(
   funcReturnTypes: Map<string, CType>,
   funcParamTypes: Map<string, CType[]>,
   funcStructParams: Map<string, Map<number, string>>,
+  funcTableIndex: Map<string, number>,
+  funcPtrTypeIndices: Map<string, number>,
 ): number[] {
   const addressTaken = findAddressTakenVars(func);
   const locals = new Map<string, number>();
@@ -1023,7 +1106,54 @@ function buildFunctionBody(
     i32Locals.push({ name: "__goto_state", ctype: "int" });
   }
 
-  const ctx: Ctx = { locals, localTypes, memVars, memVarTypes, arrayVars, structVars, structParamVars, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, varStructPtrTypes, varPtrTypes, breakDepth: null, continueDepth: null, switchTmpIdx, returnType, gotoStateIdx, gotoLabels, gotoDispatchDepth: null };
+  // Build function pointer variable info for indirect calls
+  const funcPtrVarTypeIndices = new Map<string, number>();
+  const funcPtrVarReturnTypes = new Map<string, CType>();
+  function registerFuncPtrVar(name: string, fpType: FunctionPointerTypeSpecifier): void {
+    const ptypes = fpType.paramTypes.map(t => wasmTypeFor(typeSpecToCType(t)));
+    const rtype = wasmTypeFor(typeSpecToCType(fpType.returnType));
+    // Use getTypeIdx from the enclosing generate() scope — it's captured in funcPtrTypeIndices
+    // Find matching type by building the key
+    const key = `${ptypes.join(",")}->${rtype}`;
+    // Search existing type indices
+    let typeIdx = 0;
+    for (const [fname, tidx] of funcPtrTypeIndices) {
+      // Check if this function has the same signature
+      const fParamTypes = funcParamTypes.get(fname);
+      const fRetType = funcReturnTypes.get(fname);
+      if (fParamTypes && fRetType) {
+        const fptypes = fParamTypes.map(t => wasmTypeFor(t));
+        const frtype = wasmTypeFor(fRetType);
+        const fkey = `${fptypes.join(",")}->${frtype}`;
+        if (fkey === key) { typeIdx = tidx; break; }
+      }
+    }
+    funcPtrVarTypeIndices.set(name, typeIdx);
+    funcPtrVarReturnTypes.set(name, typeSpecToCType(fpType.returnType));
+  }
+  // Register function pointer params
+  for (const p of func.params) {
+    if (typeof p.typeSpec === "object" && "kind" in p.typeSpec && p.typeSpec.kind === "functionPointer") {
+      registerFuncPtrVar(p.name, p.typeSpec as FunctionPointerTypeSpecifier);
+    }
+  }
+  // Register function pointer local variables
+  function scanFuncPtrDecls(stmts: Statement[]): void {
+    for (const s of stmts) {
+      if (s.type === "VariableDeclaration" && typeof s.typeSpec === "object" && "kind" in s.typeSpec && (s.typeSpec as any).kind === "functionPointer") {
+        registerFuncPtrVar(s.name, s.typeSpec as FunctionPointerTypeSpecifier);
+      }
+      if (s.type === "IfStatement") { scanFuncPtrDecls(s.consequent); if (s.alternate) scanFuncPtrDecls(s.alternate); }
+      else if (s.type === "WhileStatement") scanFuncPtrDecls(s.body);
+      else if (s.type === "DoWhileStatement") scanFuncPtrDecls(s.body);
+      else if (s.type === "ForStatement") { scanFuncPtrDecls([s.init]); scanFuncPtrDecls(s.body); }
+      else if (s.type === "SwitchStatement") { for (const c of s.cases) scanFuncPtrDecls(c.body); }
+      else if (s.type === "LabeledStatement") scanFuncPtrDecls([s.body]);
+    }
+  }
+  scanFuncPtrDecls(func.body);
+
+  const ctx: Ctx = { locals, localTypes, memVars, memVarTypes, arrayVars, structVars, structParamVars, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, varStructPtrTypes, varPtrTypes, funcTableIndex, funcPtrTypeIndices: funcPtrTypeIndices, funcPtrVarTypeIndices, funcPtrVarReturnTypes, breakDepth: null, continueDepth: null, switchTmpIdx, returnType, gotoStateIdx, gotoLabels, gotoDispatchDepth: null };
   const instructions: number[] = [];
 
   for (const ap of atParamCopies) {
@@ -1428,7 +1558,10 @@ function inferType(expr: Expression, ctx: Ctx): CType {
       if (expr.operator === "~") return inferType(expr.operand, ctx);
       return inferType(expr.operand, ctx);
     case "CastExpression": return typeSpecToCType(expr.targetType);
-    case "CallExpression": return ctx.funcReturnTypes.get(expr.callee) || "int";
+    case "CallExpression": {
+      if (expr.indirect) return ctx.funcPtrVarReturnTypes?.get(expr.callee) || "int";
+      return ctx.funcReturnTypes.get(expr.callee) || "int";
+    }
     case "AssignmentExpression": return getVarType(expr.name, ctx);
     case "CompoundAssignmentExpression": return getVarType(expr.name, ctx);
     case "UpdateExpression": return getVarType(expr.name, ctx);
@@ -1750,6 +1883,15 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
         out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(sp.localIdx));
         return "int";
       }
+      // Function name as value: emit table index for function pointers
+      if (!ctx.locals.has(expr.name) && !ctx.memVars.has(expr.name) && !ctx.globalIndex.has(expr.name)) {
+        const tblIdx = ctx.funcTableIndex.get(expr.name);
+        if (tblIdx !== undefined) {
+          tableUsed = true;
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(tblIdx));
+          return "int";
+        }
+      }
       return emitVarGet(out, expr.name, ctx);
     case "AssignmentExpression": {
       const varType = getVarType(expr.name, ctx);
@@ -1829,6 +1971,24 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
           out.push(Op.DROP);
         }
         return "void";
+      }
+      // Indirect call through function pointer variable
+      if (expr.indirect) {
+        tableUsed = true;
+        // Emit arguments
+        for (let i = 0; i < expr.args.length; i++) {
+          emitExpression(out, expr.args[i], ctx);
+        }
+        // Push the function pointer (table index) onto stack
+        emitVarGet(out, expr.callee, ctx);
+        // Determine type index from the variable's function pointer type
+        const varType = ctx.localTypes.get(expr.callee);
+        // For function pointer params/vars, find the type index by matching signature
+        // Look up from funcPtrTypeIndices via any function with matching signature,
+        // or compute it from the FunctionPointerTypeSpecifier stored as variable info
+        const fpTypeIdx = ctx.funcPtrVarTypeIndices?.get(expr.callee) ?? 0;
+        out.push(Op.CALL_INDIRECT, ...encodeUnsignedLEB128(fpTypeIdx), 0x00);
+        return ctx.funcPtrVarReturnTypes?.get(expr.callee) || "int";
       }
       const fIdx = ctx.funcIndex.get(expr.callee);
       if (fIdx === undefined) throw new Error(`Unknown function '${expr.callee}'`);

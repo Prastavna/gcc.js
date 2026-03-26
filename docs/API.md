@@ -151,7 +151,7 @@ const wasmBytes = generate(ast);
 
 ---
 
-## Supported C Subset (through Milestone 21)
+## Supported C Subset (through Milestone 22)
 
 ### Types
 - `int` (32-bit signed), `char` (8-bit signed), `short` (16-bit signed), `long` (64-bit signed), `void`
@@ -181,7 +181,11 @@ const wasmBytes = generate(ast);
 
 ### Declarations
 - Functions: `int add(int a, int b) { ... }`
+- Forward declarations: `int foo(int x);` (before definition)
 - Extern functions: `int printf(int ptr);`
+- Function pointer variables: `int (*fp)(int, int) = add;`
+- Function pointer parameters: `int apply(int (*op)(int, int), int x, int y)`
+- `typedef` for function pointers: `typedef int (*BinOp)(int, int);`
 - Local variables: `int x = 10;`, `char c = 'A';`, `long big = 100000;`, `float f = 3.14f;`, `double d = 2.718;`
 - Global variables: `int counter = 0;`
 - Arrays: `int arr[5] = {1, 2, 3, 4, 5};`
@@ -197,7 +201,7 @@ const wasmBytes = generate(ast);
 - Increment/decrement: `++x`, `x++`, `--x`, `x--`
 - Pointers: `&x`, `*p`, `*p = val`
 - Arrays: `arr[i]`, `arr[i] = val`
-- Function calls: `add(3, 4)`
+- Function calls: `add(3, 4)`, `fp(3, 4)` (indirect via function pointer)
 - Comma operator: `(a, b, c)` — evaluates all, returns last
 
 ### Statements

@@ -7,6 +7,7 @@ import type {
   Statement,
   Expression,
   TypeSpecifier,
+  FunctionPointerTypeSpecifier,
   BinaryOperator,
   ComparisonOperator,
   LogicalOperator,
@@ -26,6 +27,8 @@ export function parse(tokens: Token[]): Program {
   // Maps for compile-time constant resolution
   const enumConstants = new Map<string, number>();
   const typedefs = new Map<string, TypeSpecifier>();
+  // Track function pointer variables for indirect call detection
+  const funcPtrVars = new Set<string>();
 
   function current(): Token {
     return tokens[pos];
@@ -511,7 +514,8 @@ export function parse(tokens: Token[]): Program {
           }
         }
         expect(TokenType.RPAREN, "')' after function arguments");
-        return { type: "CallExpression", callee: name, args };
+        const indirect = funcPtrVars.has(name) || undefined;
+        return { type: "CallExpression", callee: name, args, indirect };
       }
       return { type: "Identifier", name };
     }
@@ -652,6 +656,27 @@ export function parse(tokens: Token[]): Program {
       return { type: "VariableDeclaration", name, typeSpec, initializer, pointer: true };
     }
 
+    // Function pointer variable declaration: int (*fp)(int, int) = funcname;
+    if (isTypeSpec() && peek(typeSpecLength()).type === TokenType.LPAREN && peek(typeSpecLength() + 1).type === TokenType.STAR) {
+      const retType = parseTypeSpec();
+      pos++; // skip (
+      pos++; // skip *
+      const name = expect(TokenType.IDENTIFIER, "function pointer name").value;
+      expect(TokenType.RPAREN, "')' after function pointer name");
+      const paramTypes = parseFuncPtrParamTypes();
+      const fpType: FunctionPointerTypeSpecifier = { kind: "functionPointer", returnType: retType, paramTypes };
+      funcPtrVars.add(name);
+      let initializer: Expression;
+      if (current().type === TokenType.EQUALS) {
+        pos++;
+        initializer = parseExpression();
+      } else {
+        initializer = { type: "IntegerLiteral", value: 0 };
+      }
+      expect(TokenType.SEMICOLON, "';' after function pointer declaration");
+      return { type: "VariableDeclaration", name, typeSpec: fpType, initializer };
+    }
+
     // Pointer variable declaration: int *p = expr;
     if (
       isTypeSpec() &&
@@ -708,6 +733,10 @@ export function parse(tokens: Token[]): Program {
       // Consume any post-type qualifiers like `int const x = ...`
       while (isQualifierOrStorage(current().type)) pos++;
       const name = expect(TokenType.IDENTIFIER, "variable name").value;
+      // Track function pointer variables (from typedef)
+      if (typeof typeSpec === "object" && "kind" in typeSpec && typeSpec.kind === "functionPointer") {
+        funcPtrVars.add(name);
+      }
       expect(TokenType.EQUALS, "'=' in variable declaration");
       const initializer = parseExpression();
       expect(TokenType.SEMICOLON, "';' after variable declaration");
@@ -723,6 +752,9 @@ export function parse(tokens: Token[]): Program {
       const typeSpec = parseTypeSpec();
       while (isQualifierOrStorage(current().type)) pos++;
       const name = expect(TokenType.IDENTIFIER, "variable name").value;
+      if (typeof typeSpec === "object" && "kind" in typeSpec && typeSpec.kind === "functionPointer") {
+        funcPtrVars.add(name);
+      }
       expect(TokenType.SEMICOLON, "';' after variable declaration");
       // Synthesize a zero initializer
       const initializer: Expression = (typeSpec === "float")
@@ -891,9 +923,56 @@ export function parse(tokens: Token[]): Program {
 
   // ── Top-level parsing ─────────────────────────────────
 
-  /** Parse one parameter, handling optional `*` for pointer types */
+  /**
+   * Parse function pointer parameter type list: (int, int)
+   * Called after consuming `returnType (*name)`
+   */
+  function parseFuncPtrParamTypes(): TypeSpecifier[] {
+    expect(TokenType.LPAREN, "'(' for function pointer param types");
+    const types: TypeSpecifier[] = [];
+    if (current().type !== TokenType.RPAREN) {
+      types.push(parseTypeSpec());
+      // Skip optional * in param types
+      if (current().type === TokenType.STAR) pos++;
+      // Skip optional param name
+      if (current().type === TokenType.IDENTIFIER) pos++;
+      while (current().type === TokenType.COMMA) {
+        pos++;
+        types.push(parseTypeSpec());
+        if (current().type === TokenType.STAR) pos++;
+        if (current().type === TokenType.IDENTIFIER) pos++;
+      }
+    }
+    expect(TokenType.RPAREN, "')' after function pointer param types");
+    return types;
+  }
+
+  /**
+   * Check if current position starts a function pointer declaration: type (*name)(...)
+   * Must be called AFTER consuming type specifier at the current position.
+   * Lookahead: ( * identifier )
+   */
+  function isFuncPtrDeclAhead(): boolean {
+    if (current().type !== TokenType.LPAREN) return false;
+    return peek(1).type === TokenType.STAR && peek(2).type === TokenType.IDENTIFIER && peek(3).type === TokenType.RPAREN;
+  }
+
+  /** Parse one parameter, handling optional `*` for pointer types and function pointer params */
   function parseOneParam(): Parameter {
     const typeSpec = parseTypeSpec();
+
+    // Function pointer parameter: int (*op)(int, int)
+    if (isFuncPtrDeclAhead()) {
+      pos++; // skip (
+      pos++; // skip *
+      const name = expect(TokenType.IDENTIFIER, "parameter name").value;
+      expect(TokenType.RPAREN, "')' after function pointer name");
+      const paramTypes = parseFuncPtrParamTypes();
+      const fpType: FunctionPointerTypeSpecifier = { kind: "functionPointer", returnType: typeSpec, paramTypes };
+      funcPtrVars.add(name);
+      return { type: "Parameter", name, typeSpec: fpType, pointer: false };
+    }
+
     // Skip optional * for pointer params (int *p) — treated as i32 at WASM level
     let pointer = false;
     if (current().type === TokenType.STAR) { pos++; pointer = true; }
@@ -976,10 +1055,24 @@ export function parse(tokens: Token[]): Program {
     return { type: "EnumDeclaration", name, members };
   }
 
-  /** Parse a typedef: typedef type alias; */
+  /** Parse a typedef: typedef type alias; or typedef type (*alias)(params); */
   function parseTypedef(): Declaration | null {
     pos++; // skip 'typedef'
     const baseType = parseTypeSpec();
+
+    // Function pointer typedef: typedef int (*Name)(int, int);
+    if (current().type === TokenType.LPAREN && peek(1).type === TokenType.STAR) {
+      pos++; // skip (
+      pos++; // skip *
+      const aliasName = expect(TokenType.IDENTIFIER, "typedef alias name").value;
+      expect(TokenType.RPAREN, "')' after function pointer typedef name");
+      const paramTypes = parseFuncPtrParamTypes();
+      const fpType: FunctionPointerTypeSpecifier = { kind: "functionPointer", returnType: baseType, paramTypes };
+      typedefs.set(aliasName, fpType);
+      expect(TokenType.SEMICOLON, "';' after typedef");
+      return null;
+    }
+
     // Optional pointer
     if (current().type === TokenType.STAR) pos++;
     const aliasName = expect(TokenType.IDENTIFIER, "typedef alias name").value;
@@ -1042,10 +1135,14 @@ export function parse(tokens: Token[]): Program {
     const params = parseParamList();
     expect(TokenType.RPAREN, "')'");
 
-    // Extern function declaration: ends with ';' (no body)
+    // Function prototype ending with ';' (no body)
     if (current().type === TokenType.SEMICOLON) {
       pos++;
-      return { type: "ExternFunctionDeclaration", name, returnType: typeSpec, params };
+      if (quals.isExtern) {
+        return { type: "ExternFunctionDeclaration", name, returnType: typeSpec, params };
+      }
+      // Forward declaration (non-extern prototype)
+      return { type: "ForwardDeclaration", name, returnType: typeSpec, params };
     }
 
     expect(TokenType.LBRACE, "'{'");

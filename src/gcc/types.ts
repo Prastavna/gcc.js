@@ -124,7 +124,13 @@ export interface UnionTypeSpecifier {
   name: string;
 }
 
-export type TypeSpecifier = "int" | "void" | "char" | "short" | "long" | "float" | "double" | "unsigned int" | "unsigned char" | "unsigned short" | StructTypeSpecifier | UnionTypeSpecifier;
+export interface FunctionPointerTypeSpecifier {
+  kind: "functionPointer";
+  returnType: TypeSpecifier;
+  paramTypes: TypeSpecifier[];
+}
+
+export type TypeSpecifier = "int" | "void" | "char" | "short" | "long" | "float" | "double" | "unsigned int" | "unsigned char" | "unsigned short" | StructTypeSpecifier | UnionTypeSpecifier | FunctionPointerTypeSpecifier;
 
 export interface IntegerLiteral {
   type: "IntegerLiteral";
@@ -175,6 +181,7 @@ export interface CallExpression {
   type: "CallExpression";
   callee: string;
   args: Expression[];
+  indirect?: boolean; // true when calling through a function pointer
 }
 
 /** &x — takes the address of a variable */
@@ -457,6 +464,13 @@ export interface ExternFunctionDeclaration {
   params: Parameter[];
 }
 
+export interface ForwardDeclaration {
+  type: "ForwardDeclaration";
+  name: string;
+  returnType: TypeSpecifier;
+  params: Parameter[];
+}
+
 export interface GlobalVariableDeclaration {
   type: "GlobalVariableDeclaration";
   name: string;
@@ -489,7 +503,7 @@ export interface UnionDeclaration {
   fields: StructFieldDeclaration[];
 }
 
-export type Declaration = FunctionDeclaration | ExternFunctionDeclaration | GlobalVariableDeclaration | StructDeclaration | EnumDeclaration | UnionDeclaration;
+export type Declaration = FunctionDeclaration | ExternFunctionDeclaration | ForwardDeclaration | GlobalVariableDeclaration | StructDeclaration | EnumDeclaration | UnionDeclaration;
 
 export interface Program {
   type: "Program";

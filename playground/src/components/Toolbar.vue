@@ -167,6 +167,10 @@ const examples: { label: string; code: string }[] = [
     label: 'Stringify & paste',
     code: `#define CONCAT(a, b) a##b\n#define MAKE_VAR(n) CONCAT(var, n)\n\nint main() {\n    int MAKE_VAR(1) = 10;\n    int MAKE_VAR(2) = 20;\n    return var1 + var2;\n}`,
   },
+  {
+    label: 'Function pointers',
+    code: `int add(int a, int b) { return a + b; }\nint mul(int a, int b) { return a * b; }\n\nint apply(int (*op)(int, int), int x, int y) {\n    return op(x, y);\n}\n\nint main() {\n    int (*fn)(int, int) = add;\n    int result = apply(fn, 3, 4);\n    fn = mul;\n    return result + fn(5, 6);\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

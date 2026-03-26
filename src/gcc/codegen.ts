@@ -10,40 +10,56 @@ import {
   BLOCK_VOID,
   BLOCK_I32,
   BLOCK_I64,
+  BLOCK_F32,
+  BLOCK_F64,
   encodeUnsignedLEB128,
   encodeSignedLEB128,
   encodeSignedLEB128_i64,
+  encodeF32,
+  encodeF64,
   encodeName,
   makeSection,
 } from "./wasm.ts";
 
 // ── C type helpers ──────────────────────────────────────────
 
-type CType = "char" | "int" | "long" | "void" | "uchar" | "uint";
+type CType = "char" | "int" | "long" | "void" | "uchar" | "uint" | "float" | "double";
 
 function isUnsigned(ctype: CType): boolean {
   return ctype === "uchar" || ctype === "uint";
 }
 
 function wasmTypeFor(ctype: CType): number {
-  return ctype === "long" ? ValType.I64 : ValType.I32;
+  if (ctype === "long") return ValType.I64;
+  if (ctype === "float") return ValType.F32;
+  if (ctype === "double") return ValType.F64;
+  return ValType.I32;
 }
 
 function blockTypeFor(ctype: CType): number {
-  return ctype === "long" ? BLOCK_I64 : BLOCK_I32;
+  if (ctype === "long") return BLOCK_I64;
+  if (ctype === "float") return BLOCK_F32;
+  if (ctype === "double") return BLOCK_F64;
+  return BLOCK_I32;
 }
 
 function sizeOfType(ctype: CType): number {
   switch (ctype) {
     case "char": case "uchar": return 1;
-    case "int": case "uint": return 4;
-    case "long": return 8;
+    case "int": case "uint": case "float": return 4;
+    case "long": case "double": return 8;
     case "void": return 0;
   }
 }
 
-/** Promote: char < int < long. Returns the wider type. Unsigned wins if either is unsigned. */
+function isFP(ctype: CType): boolean {
+  return ctype === "float" || ctype === "double";
+}
+
+/** Promote: char < int < long < float < double. Unsigned wins if both int types. */
 function promoteTypes(a: CType, b: CType): CType {
+  if (a === "double" || b === "double") return "double";
+  if (a === "float" || b === "float") return "float";
   if (a === "long" || b === "long") return "long";
   if (isUnsigned(a) || isUnsigned(b)) return "uint";
   return "int"; // char promotes to int
@@ -53,11 +69,22 @@ function emitConversion(out: number[], from: CType, to: CType): void {
   const fromW = wasmTypeFor(from);
   const toW = wasmTypeFor(to);
   if (fromW === toW) return;
-  if (fromW === ValType.I32 && toW === ValType.I64) {
-    out.push(Op.I64_EXTEND_I32_S);
-  } else if (fromW === ValType.I64 && toW === ValType.I32) {
-    out.push(Op.I32_WRAP_I64);
-  }
+  // i32 → others
+  if (fromW === ValType.I32 && toW === ValType.I64) { out.push(Op.I64_EXTEND_I32_S); return; }
+  if (fromW === ValType.I32 && toW === ValType.F32) { out.push(Op.F32_CONVERT_I32_S); return; }
+  if (fromW === ValType.I32 && toW === ValType.F64) { out.push(Op.F64_CONVERT_I32_S); return; }
+  // i64 → others
+  if (fromW === ValType.I64 && toW === ValType.I32) { out.push(Op.I32_WRAP_I64); return; }
+  if (fromW === ValType.I64 && toW === ValType.F32) { out.push(Op.F32_CONVERT_I64_S); return; }
+  if (fromW === ValType.I64 && toW === ValType.F64) { out.push(Op.F64_CONVERT_I64_S); return; }
+  // f32 → others
+  if (fromW === ValType.F32 && toW === ValType.I32) { out.push(Op.I32_TRUNC_F32_S); return; }
+  if (fromW === ValType.F32 && toW === ValType.I64) { out.push(Op.I64_TRUNC_F32_S); return; }
+  if (fromW === ValType.F32 && toW === ValType.F64) { out.push(Op.F64_PROMOTE_F32); return; }
+  // f64 → others
+  if (fromW === ValType.F64 && toW === ValType.I32) { out.push(Op.I32_TRUNC_F64_S); return; }
+  if (fromW === ValType.F64 && toW === ValType.I64) { out.push(Op.I64_TRUNC_F64_S); return; }
+  if (fromW === ValType.F64 && toW === ValType.F32) { out.push(Op.F32_DEMOTE_F64); return; }
 }
 
 // ── Struct layout types ──────────────────────────────────
@@ -467,6 +494,8 @@ function evalConstExpr(expr: Expression): number | null {
   switch (expr.type) {
     case "IntegerLiteral":
       return expr.value;
+    case "FloatingLiteral":
+      return expr.value;
     case "CharLiteral":
       return expr.value;
     case "UnaryExpression":
@@ -532,6 +561,10 @@ function buildGlobalSectionWithHeap(globals: GlobalVariableDeclaration[], includ
     const val = evalConstExpr(g.initializer);
     if (ctype === "long") {
       content.push(Op.I64_CONST, ...encodeSignedLEB128_i64(val ?? 0), Op.END);
+    } else if (ctype === "float") {
+      content.push(Op.F32_CONST, ...encodeF32(val ?? 0), Op.END);
+    } else if (ctype === "double") {
+      content.push(Op.F64_CONST, ...encodeF64(val ?? 0), Op.END);
     } else {
       content.push(Op.I32_CONST, ...encodeSignedLEB128(val ?? 0), Op.END);
     }
@@ -789,17 +822,27 @@ function buildFunctionBody(
   }
   const needsSwitchTmp = hasSwitchStmt(func.body);
 
-  // Partition into i32 and i64 locals
-  const i32Locals = allDeclaredVars.filter(v => v.ctype !== "long");
-  const i64Locals = allDeclaredVars.filter(v => v.ctype === "long");
+  // Partition locals by WASM type: i32, i64, f32, f64
+  const i32Locals = allDeclaredVars.filter(v => wasmTypeFor(v.ctype) === ValType.I32);
+  const i64Locals = allDeclaredVars.filter(v => wasmTypeFor(v.ctype) === ValType.I64);
+  const f32Locals = allDeclaredVars.filter(v => wasmTypeFor(v.ctype) === ValType.F32);
+  const f64Locals = allDeclaredVars.filter(v => wasmTypeFor(v.ctype) === ValType.F64);
 
-  // Assign indices: params first (in order), then i32 locals, then i64 locals
+  // Assign indices: params first (in order), then i32, i64, f32, f64 locals
   let nextIdx = paramLocalCount;
   for (const v of i32Locals) {
     locals.set(v.name, nextIdx++);
     localTypes.set(v.name, v.ctype);
   }
   for (const v of i64Locals) {
+    locals.set(v.name, nextIdx++);
+    localTypes.set(v.name, v.ctype);
+  }
+  for (const v of f32Locals) {
+    locals.set(v.name, nextIdx++);
+    localTypes.set(v.name, v.ctype);
+  }
+  for (const v of f64Locals) {
     locals.set(v.name, nextIdx++);
     localTypes.set(v.name, v.ctype);
   }
@@ -982,11 +1025,7 @@ function buildFunctionBody(
   for (const ap of atParamCopies) {
     instructions.push(Op.I32_CONST, ...encodeSignedLEB128(ap.memAddr));
     instructions.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(ap.paramIdx));
-    if (ap.ctype === "long") {
-      instructions.push(Op.I64_STORE, 0x03, 0x00);
-    } else {
-      instructions.push(Op.I32_STORE, 0x02, 0x00);
-    }
+    emitMemStore(instructions, ap.ctype);
   }
 
   if (needsGoto) {
@@ -1001,6 +1040,8 @@ function buildFunctionBody(
   const localGroups: [number, number][] = []; // [count, type]
   if (i32Locals.length > 0) localGroups.push([i32Locals.length, ValType.I32]);
   if (i64Locals.length > 0) localGroups.push([i64Locals.length, ValType.I64]);
+  if (f32Locals.length > 0) localGroups.push([f32Locals.length, ValType.F32]);
+  if (f64Locals.length > 0) localGroups.push([f64Locals.length, ValType.F64]);
 
   if (localGroups.length > 0) {
     localDeclBytes.push(...encodeUnsignedLEB128(localGroups.length));
@@ -1014,6 +1055,10 @@ function buildFunctionBody(
   // Implicit return value
   if (returnType === "long") {
     instructions.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0));
+  } else if (returnType === "float") {
+    instructions.push(Op.F32_CONST, ...encodeF32(0));
+  } else if (returnType === "double") {
+    instructions.push(Op.F64_CONST, ...encodeF64(0));
   } else {
     instructions.push(Op.I32_CONST, ...encodeSignedLEB128(0));
   }
@@ -1087,6 +1132,21 @@ function emitGotoStateMachine(out: number[], stmts: Statement[], ctx: Ctx): void
 
 // ── Statement emission ───────────────────────────────────
 
+/** Convert a condition value to i32 (WASM control flow requires i32). */
+function emitCondToI32(out: number[], condType: CType): void {
+  if (condType === "long") {
+    out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0));
+    out.push(Op.I64_NE);
+  } else if (condType === "double") {
+    out.push(Op.F64_CONST, ...encodeF64(0));
+    out.push(Op.F64_NE);
+  } else if (condType === "float") {
+    out.push(Op.F32_CONST, ...encodeF32(0));
+    out.push(Op.F32_NE);
+  }
+  // i32 types are already valid conditions
+}
+
 function emitStatements(out: number[], stmts: Statement[], ctx: Ctx): void {
   for (const stmt of stmts) emitStatement(out, stmt, ctx);
 }
@@ -1138,11 +1198,7 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
     }
     case "IfStatement": {
       const condType = emitExpression(out, stmt.condition, ctx);
-      // Condition must be i32 for WASM if
-      if (condType === "long") {
-        out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0));
-        out.push(Op.I64_NE);
-      }
+      emitCondToI32(out, condType);
       out.push(Op.IF, BLOCK_VOID);
       // IF adds one nesting level for break/continue depth
       const oldBreakIf = ctx.breakDepth;
@@ -1169,10 +1225,7 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       ctx.continueDepth = 0;  // BR 0 goes to LOOP start
       if (ctx.gotoDispatchDepth !== null) ctx.gotoDispatchDepth += 2;
       const condType = emitExpression(out, stmt.condition, ctx);
-      if (condType === "long") {
-        out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0));
-        out.push(Op.I64_NE);
-      }
+      emitCondToI32(out, condType);
       out.push(Op.I32_EQZ, Op.BR_IF, ...encodeUnsignedLEB128(1));
       for (const s of stmt.body) emitStatement(out, s, ctx);
       ctx.breakDepth = oldBreakW;
@@ -1199,10 +1252,7 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       ctx.gotoDispatchDepth = oldGotoDW;
       out.push(Op.END); // end continue block
       const condTypeDW = emitExpression(out, stmt.condition, ctx);
-      if (condTypeDW === "long") {
-        out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0));
-        out.push(Op.I64_NE);
-      }
+      emitCondToI32(out, condTypeDW);
       out.push(Op.BR_IF, ...encodeUnsignedLEB128(0)); // if true, loop back
       out.push(Op.END, Op.END); // end loop, end break block
       break;
@@ -1213,10 +1263,7 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       emitStatement(out, stmt.init, ctx);
       out.push(Op.BLOCK, BLOCK_VOID, Op.LOOP, BLOCK_VOID);
       const condType = emitExpression(out, stmt.condition, ctx);
-      if (condType === "long") {
-        out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0));
-        out.push(Op.I64_NE);
-      }
+      emitCondToI32(out, condType);
       out.push(Op.I32_EQZ, Op.BR_IF, ...encodeUnsignedLEB128(1));
       // BLOCK for continue target — exiting this block jumps to update
       out.push(Op.BLOCK, BLOCK_VOID);
@@ -1359,6 +1406,7 @@ function exprProducesValue(expr: Expression): boolean {
 function inferType(expr: Expression, ctx: Ctx): CType {
   switch (expr.type) {
     case "IntegerLiteral": return "int";
+    case "FloatingLiteral": return expr.isFloat ? "float" : "double";
     case "CharLiteral": return "int"; // char literal promotes to int in C
     case "StringLiteral": return "int"; // pointer
     case "SizeofExpression": return "int";
@@ -1412,6 +1460,12 @@ function emitMemLoad(out: number[], ctype: CType): void {
     case "long":
       out.push(Op.I64_LOAD, 0x03, 0x00);
       break;
+    case "float":
+      out.push(Op.F32_LOAD, 0x02, 0x00);
+      break;
+    case "double":
+      out.push(Op.F64_LOAD, 0x03, 0x00);
+      break;
     default: // int, uint
       out.push(Op.I32_LOAD, 0x02, 0x00);
       break;
@@ -1425,6 +1479,12 @@ function emitMemStore(out: number[], ctype: CType): void {
       break;
     case "long":
       out.push(Op.I64_STORE, 0x03, 0x00);
+      break;
+    case "float":
+      out.push(Op.F32_STORE, 0x02, 0x00);
+      break;
+    case "double":
+      out.push(Op.F64_STORE, 0x03, 0x00);
       break;
     default: // int, uint
       out.push(Op.I32_STORE, 0x02, 0x00);
@@ -1488,12 +1548,30 @@ const BINOP_MAP_I64: Record<string, number> = {
   "&": Op.I64_AND, "|": Op.I64_OR, "^": Op.I64_XOR, "<<": Op.I64_SHL, ">>": Op.I64_SHR_S,
 };
 
+const BINOP_MAP_F32: Record<string, number> = {
+  "+": Op.F32_ADD, "-": Op.F32_SUB, "*": Op.F32_MUL, "/": Op.F32_DIV,
+  "==": Op.F32_EQ, "!=": Op.F32_NE, "<": Op.F32_LT, ">": Op.F32_GT, "<=": Op.F32_LE, ">=": Op.F32_GE,
+};
+
+const BINOP_MAP_F64: Record<string, number> = {
+  "+": Op.F64_ADD, "-": Op.F64_SUB, "*": Op.F64_MUL, "/": Op.F64_DIV,
+  "==": Op.F64_EQ, "!=": Op.F64_NE, "<": Op.F64_LT, ">": Op.F64_GT, "<=": Op.F64_LE, ">=": Op.F64_GE,
+};
+
 const COMPOUND_OP_MAP: Record<string, number> = {
   "+=": Op.I32_ADD, "-=": Op.I32_SUB, "*=": Op.I32_MUL, "/=": Op.I32_DIV_S, "%=": Op.I32_REM_S,
 };
 
 const COMPOUND_OP_MAP_I64: Record<string, number> = {
   "+=": Op.I64_ADD, "-=": Op.I64_SUB, "*=": Op.I64_MUL, "/=": Op.I64_DIV_S, "%=": Op.I64_REM_S,
+};
+
+const COMPOUND_OP_MAP_F32: Record<string, number> = {
+  "+=": Op.F32_ADD, "-=": Op.F32_SUB, "*=": Op.F32_MUL, "/=": Op.F32_DIV,
+};
+
+const COMPOUND_OP_MAP_F64: Record<string, number> = {
+  "+=": Op.F64_ADD, "-=": Op.F64_SUB, "*=": Op.F64_MUL, "/=": Op.F64_DIV,
 };
 
 function emitVarGet(out: number[], name: string, ctx: Ctx): CType {
@@ -1529,6 +1607,14 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
     case "IntegerLiteral":
       out.push(Op.I32_CONST, ...encodeSignedLEB128(expr.value));
       return "int";
+    case "FloatingLiteral":
+      if (expr.isFloat) {
+        out.push(Op.F32_CONST, ...encodeF32(expr.value));
+        return "float";
+      } else {
+        out.push(Op.F64_CONST, ...encodeF64(expr.value));
+        return "double";
+      }
     case "CharLiteral":
       out.push(Op.I32_CONST, ...encodeSignedLEB128(expr.value));
       return "int";
@@ -1562,7 +1648,11 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       const rt = emitExpression(out, expr.right, ctx);
       emitConversion(out, rt, opType);
 
-      if (opType === "long") {
+      if (opType === "double") {
+        out.push(BINOP_MAP_F64[expr.operator]);
+      } else if (opType === "float") {
+        out.push(BINOP_MAP_F32[expr.operator]);
+      } else if (opType === "long") {
         out.push(BINOP_MAP_I64[expr.operator]);
       } else if (isUnsigned(opType) && BINOP_MAP_U32[expr.operator] !== undefined) {
         out.push(BINOP_MAP_U32[expr.operator]);
@@ -1571,13 +1661,20 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       }
       // Comparisons always return i32
       if (isComparison) return "int";
-      if (isBitwise) return opType;
       return opType;
     }
     case "UnaryExpression":
       if (expr.operator === "-") {
         const operandType = inferType(expr.operand, ctx);
-        if (operandType === "long") {
+        if (operandType === "double") {
+          emitExpression(out, expr.operand, ctx);
+          out.push(Op.F64_NEG);
+          return "double";
+        } else if (operandType === "float") {
+          emitExpression(out, expr.operand, ctx);
+          out.push(Op.F32_NEG);
+          return "float";
+        } else if (operandType === "long") {
           out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0));
           emitExpression(out, expr.operand, ctx);
           out.push(Op.I64_SUB);
@@ -1590,7 +1687,13 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
         }
       } else if (expr.operator === "!") {
         const ot = emitExpression(out, expr.operand, ctx);
-        if (ot === "long") {
+        if (ot === "double") {
+          out.push(Op.F64_CONST, ...encodeF64(0));
+          out.push(Op.F64_EQ);
+        } else if (ot === "float") {
+          out.push(Op.F32_CONST, ...encodeF32(0));
+          out.push(Op.F32_EQ);
+        } else if (ot === "long") {
           out.push(Op.I64_EQZ);
         } else {
           out.push(Op.I32_EQZ);
@@ -1651,8 +1754,10 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
     }
     case "CompoundAssignmentExpression": {
       const varType = getVarType(expr.name, ctx);
-      const isLong = varType === "long";
-      const opMap = isLong ? COMPOUND_OP_MAP_I64 : COMPOUND_OP_MAP;
+      const opMap = varType === "double" ? COMPOUND_OP_MAP_F64
+        : varType === "float" ? COMPOUND_OP_MAP_F32
+        : varType === "long" ? COMPOUND_OP_MAP_I64
+        : COMPOUND_OP_MAP;
 
       if (ctx.memVars.has(expr.name)) {
         const addr = ctx.memVars.get(expr.name)!;
@@ -1790,22 +1895,22 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
     case "LogicalExpression":
       if (expr.operator === "&&") {
         const lt = emitExpression(out, expr.left, ctx);
-        if (lt === "long") { out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0)); out.push(Op.I64_NE); }
+        emitCondToI32(out, lt);
         out.push(Op.IF, BLOCK_I32);
         const rt = emitExpression(out, expr.right, ctx);
-        if (rt === "long") { out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0)); out.push(Op.I64_NE); }
+        emitCondToI32(out, rt);
         out.push(Op.I32_EQZ, Op.I32_EQZ);
         out.push(Op.ELSE);
         out.push(Op.I32_CONST, ...encodeSignedLEB128(0));
         out.push(Op.END);
       } else {
         const lt = emitExpression(out, expr.left, ctx);
-        if (lt === "long") { out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0)); out.push(Op.I64_NE); }
+        emitCondToI32(out, lt);
         out.push(Op.IF, BLOCK_I32);
         out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
         out.push(Op.ELSE);
         const rt = emitExpression(out, expr.right, ctx);
-        if (rt === "long") { out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0)); out.push(Op.I64_NE); }
+        emitCondToI32(out, rt);
         out.push(Op.I32_EQZ, Op.I32_EQZ);
         out.push(Op.END);
       }
@@ -1813,7 +1918,7 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
     case "TernaryExpression": {
       const resultType = inferType(expr, ctx);
       const condType = emitExpression(out, expr.condition, ctx);
-      if (condType === "long") { out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0)); out.push(Op.I64_NE); }
+      emitCondToI32(out, condType);
       out.push(Op.IF, blockTypeFor(resultType));
       const ct = emitExpression(out, expr.consequent, ctx);
       emitConversion(out, ct, resultType);
@@ -1838,7 +1943,7 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       out.push(Op.I32_MUL);
       out.push(Op.I32_ADD);
       emitMemLoad(out, elemType);
-      return elemType === "long" ? "long" : "int";
+      return elemType;
     }
     case "ArrayIndexAssignment": {
       const arrInfo = ctx.arrayVars.get(expr.array);
@@ -1862,9 +1967,20 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       const varName = expr.name;
       const varType = getVarType(varName, ctx);
       const isLong = varType === "long";
-      const addOp = isLong
+      const addOp = varType === "double"
+        ? (expr.operator === "++" ? Op.F64_ADD : Op.F64_SUB)
+        : varType === "float"
+        ? (expr.operator === "++" ? Op.F32_ADD : Op.F32_SUB)
+        : isLong
         ? (expr.operator === "++" ? Op.I64_ADD : Op.I64_SUB)
         : (expr.operator === "++" ? Op.I32_ADD : Op.I32_SUB);
+
+      function emitConstOne(o: number[]): void {
+        if (varType === "double") o.push(Op.F64_CONST, ...encodeF64(1));
+        else if (varType === "float") o.push(Op.F32_CONST, ...encodeF32(1));
+        else if (isLong) o.push(Op.I64_CONST, ...encodeSignedLEB128_i64(1));
+        else o.push(Op.I32_CONST, ...encodeSignedLEB128(1));
+      }
 
       if (ctx.memVars.has(varName)) {
         const addr = ctx.memVars.get(varName)!;
@@ -1872,11 +1988,7 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
           out.push(Op.I32_CONST, ...encodeSignedLEB128(addr));
           out.push(Op.I32_CONST, ...encodeSignedLEB128(addr));
           emitMemLoad(out, varType);
-          if (isLong) {
-            out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(1));
-          } else {
-            out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
-          }
+          emitConstOne(out);
           out.push(addOp);
           emitMemStore(out, varType);
           out.push(Op.I32_CONST, ...encodeSignedLEB128(addr));
@@ -1887,11 +1999,7 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
           out.push(Op.I32_CONST, ...encodeSignedLEB128(addr));
           out.push(Op.I32_CONST, ...encodeSignedLEB128(addr));
           emitMemLoad(out, varType);
-          if (isLong) {
-            out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(1));
-          } else {
-            out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
-          }
+          emitConstOne(out);
           out.push(addOp);
           emitMemStore(out, varType);
         }
@@ -1899,21 +2007,13 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
         const idx = ctx.locals.get(varName)!;
         if (expr.prefix) {
           out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(idx));
-          if (isLong) {
-            out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(1));
-          } else {
-            out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
-          }
+          emitConstOne(out);
           out.push(addOp);
           out.push(Op.LOCAL_TEE, ...encodeUnsignedLEB128(idx));
         } else {
           out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(idx));
           out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(idx));
-          if (isLong) {
-            out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(1));
-          } else {
-            out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
-          }
+          emitConstOne(out);
           out.push(addOp);
           out.push(Op.LOCAL_SET, ...encodeUnsignedLEB128(idx));
         }
@@ -1921,22 +2021,14 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
         const gIdx = ctx.globalIndex.get(varName)!;
         if (expr.prefix) {
           emitVarGet(out, varName, ctx);
-          if (isLong) {
-            out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(1));
-          } else {
-            out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
-          }
+          emitConstOne(out);
           out.push(addOp);
           out.push(Op.GLOBAL_SET, ...encodeUnsignedLEB128(gIdx));
           out.push(Op.GLOBAL_GET, ...encodeUnsignedLEB128(gIdx));
         } else {
           out.push(Op.GLOBAL_GET, ...encodeUnsignedLEB128(gIdx));
           out.push(Op.GLOBAL_GET, ...encodeUnsignedLEB128(gIdx));
-          if (isLong) {
-            out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(1));
-          } else {
-            out.push(Op.I32_CONST, ...encodeSignedLEB128(1));
-          }
+          emitConstOne(out);
           out.push(addOp);
           out.push(Op.GLOBAL_SET, ...encodeUnsignedLEB128(gIdx));
         }

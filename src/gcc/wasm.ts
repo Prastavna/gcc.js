@@ -119,6 +119,8 @@ export const Op = {
   // Constants
   I32_CONST: 0x41,
   I64_CONST: 0x42,
+  F32_CONST: 0x43,
+  F64_CONST: 0x44,
 
   // Memory management
   MEMORY_SIZE: 0x3f,
@@ -142,6 +144,22 @@ export const Op = {
   I64_LE_S: 0x57,
   I64_GE_S: 0x59,
 
+  // Comparison (f32)
+  F32_EQ: 0x5b,
+  F32_NE: 0x5c,
+  F32_LT: 0x5d,
+  F32_GT: 0x5e,
+  F32_LE: 0x5f,
+  F32_GE: 0x60,
+
+  // Comparison (f64)
+  F64_EQ: 0x61,
+  F64_NE: 0x62,
+  F64_LT: 0x63,
+  F64_GT: 0x64,
+  F64_LE: 0x65,
+  F64_GE: 0x66,
+
   // Memory (i32)
   I32_LOAD: 0x28,
   I32_STORE: 0x36,
@@ -151,6 +169,12 @@ export const Op = {
   // Memory (i64)
   I64_LOAD: 0x29,
   I64_STORE: 0x37,
+
+  // Memory (f32/f64)
+  F32_LOAD: 0x2a,
+  F64_LOAD: 0x2b,
+  F32_STORE: 0x38,
+  F64_STORE: 0x39,
 
   // Unsigned comparison (i32)
   I32_LT_U: 0x49,
@@ -192,9 +216,37 @@ export const Op = {
   I64_SHR_S: 0x87,
   I64_SHR_U: 0x88,
 
-  // Conversions
+  // Arithmetic (f32)
+  F32_ABS: 0x8b,
+  F32_NEG: 0x8c,
+  F32_ADD: 0x92,
+  F32_SUB: 0x93,
+  F32_MUL: 0x94,
+  F32_DIV: 0x95,
+
+  // Arithmetic (f64)
+  F64_ABS: 0x99,
+  F64_NEG: 0x9a,
+  F64_ADD: 0xa0,
+  F64_SUB: 0xa1,
+  F64_MUL: 0xa2,
+  F64_DIV: 0xa3,
+
+  // Conversions (int)
   I32_WRAP_I64: 0xa7,
+  I32_TRUNC_F32_S: 0xa8,
+  I32_TRUNC_F64_S: 0xaa,
   I64_EXTEND_I32_S: 0xac,
+  I64_TRUNC_F32_S: 0xae,
+  I64_TRUNC_F64_S: 0xb0,
+
+  // Conversions (float)
+  F32_CONVERT_I32_S: 0xb2,
+  F32_CONVERT_I64_S: 0xb4,
+  F32_DEMOTE_F64: 0xb6,
+  F64_CONVERT_I32_S: 0xb7,
+  F64_CONVERT_I64_S: 0xb9,
+  F64_PROMOTE_F32: 0xbb,
 } as const;
 
 /** WASM block type: void (no result) */
@@ -206,6 +258,12 @@ export const BLOCK_I32 = ValType.I32;
 /** WASM block type: i64 result */
 export const BLOCK_I64 = ValType.I64;
 
+/** WASM block type: f32 result */
+export const BLOCK_F32 = ValType.F32;
+
+/** WASM block type: f64 result */
+export const BLOCK_F64 = ValType.F64;
+
 /** WASM export kind */
 export const ExportKind = {
   FUNC: 0x00,
@@ -214,6 +272,24 @@ export const ExportKind = {
 
 /** WASM function type tag */
 export const FUNC_TYPE_TAG = 0x60;
+
+/**
+ * Encode a 32-bit float as 4 bytes (IEEE 754 little-endian).
+ */
+export function encodeF32(value: number): number[] {
+  const buf = new ArrayBuffer(4);
+  new DataView(buf).setFloat32(0, value, true);
+  return [...new Uint8Array(buf)];
+}
+
+/**
+ * Encode a 64-bit double as 8 bytes (IEEE 754 little-endian).
+ */
+export function encodeF64(value: number): number[] {
+  const buf = new ArrayBuffer(8);
+  new DataView(buf).setFloat64(0, value, true);
+  return [...new Uint8Array(buf)];
+}
 
 /** Encodes a string as a WASM name (length-prefixed UTF-8 bytes) */
 export function encodeName(name: string): number[] {

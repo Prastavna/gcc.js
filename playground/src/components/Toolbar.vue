@@ -137,6 +137,18 @@ const examples: { label: string; code: string }[] = [
     label: 'Goto & labels',
     code: `int main() {\n    int sum = 0;\n    int i = 1;\ntop:\n    if (i > 10) goto done;\n    sum = sum + i;\n    i = i + 1;\n    goto top;\ndone:\n    return sum;\n}`,
   },
+  {
+    label: 'Float arithmetic',
+    code: `float add(float a, float b) {\n    return a + b;\n}\n\nint main() {\n    float x = 3.14f;\n    float y = 2.86f;\n    return (int)add(x, y);\n}`,
+  },
+  {
+    label: 'Double sqrt approx',
+    code: `double sqrt_approx(double x) {\n    double guess = x / 2.0;\n    for (int i = 0; i < 20; i = i + 1) {\n        guess = (guess + x / guess) / 2.0;\n    }\n    return guess;\n}\n\nint main() {\n    return (int)sqrt_approx(144.0);\n}`,
+  },
+  {
+    label: 'Mixed int/float',
+    code: `int main() {\n    int a = 7;\n    double b = 3.14;\n    float f = 1.5f;\n    return (int)(a + b + (double)f);\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

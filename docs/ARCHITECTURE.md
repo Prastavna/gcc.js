@@ -186,17 +186,19 @@ Variables are analyzed per-function:
 |--------|----------------|------------|--------|
 | `char` / `unsigned char` | i32 | `i32.load8_s` / `i32.store8` | 1 |
 | `int` / `unsigned int` | i32 | `i32.load` / `i32.store` | 4 |
+| `float` | f32 | `f32.load` / `f32.store` | 4 |
 | `long` | i64 | `i64.load` / `i64.store` | 8 |
+| `double` | f64 | `f64.load` / `f64.store` | 8 |
 
-Unsigned types use unsigned opcodes for division (`div_u`), remainder (`rem_u`), comparison (`lt_u`, `gt_u`, etc.), and right shift (`shr_u`).
+Unsigned types use unsigned opcodes for division (`div_u`), remainder (`rem_u`), comparison (`lt_u`, `gt_u`, etc.), and right shift (`shr_u`). Float/double use FP-specific opcodes (`f32.add`, `f64.mul`, etc.).
 
 **Type tracking:** The codegen maintains type maps (`localTypes`, `memVarTypes`, `globalTypes`, `funcReturnTypes`, `funcParamTypes`) to determine correct opcodes and conversions.
 
-**`emitExpression` returns `CType`** — callers use the returned type to insert conversions (`i64.extend_i32_s` or `i32.wrap_i64`) when needed.
+**`emitExpression` returns `CType`** — callers use the returned type to insert conversions as needed. The conversion matrix covers all 12 combinations between i32/i64/f32/f64 (e.g., `f64.convert_i32_s`, `i32.trunc_f64_s`, `f32.demote_f64`, `f64.promote_f32`).
 
 **`inferType(expr)`** — computes expression result type without emitting code, used for promotion decisions.
 
-**Promotion rule:** In binary ops, both operands are promoted to the wider type (char < int < long). Comparisons always return int.
+**Promotion rule:** In binary ops, both operands are promoted to the wider type (char < int < long < float < double). Comparisons always return int.
 
 **Cast parsing:** `(type)expr` is disambiguated from `(expr)` by lookahead — if `(` followed by type keyword then `)`, it's a cast.
 
@@ -264,6 +266,6 @@ if (result.ok) {
 2. **Pure functions** — Each stage is `(input) => output` with no side effects.
 3. **No optimization passes** — Codegen emits naive but correct WASM.
 4. **Single-file compilation** — One C source string → one WASM module.
-5. **Multi-type support** — `char` and `int` map to WASM `i32`, `long` maps to `i64`. Type-aware codegen handles conversions automatically.
+5. **Multi-type support** — `char` and `int` map to WASM `i32`, `long` maps to `i64`, `float` maps to `f32`, `double` maps to `f64`. Type-aware codegen handles conversions automatically.
 6. **Memory only when needed** — Memory section is only emitted when pointers or strings are used, keeping simple programs minimal.
 7. **Address-taken analysis** — Only variables with `&` taken go to memory; others stay as fast WASM locals.

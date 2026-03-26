@@ -48,7 +48,7 @@ export function parse(tokens: Token[]): Program {
 
   function isTypeSpec(): boolean {
     const t = current().type;
-    if (t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG || t === TokenType.STRUCT || t === TokenType.ENUM || t === TokenType.UNION || t === TokenType.UNSIGNED) return true;
+    if (t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG || t === TokenType.FLOAT || t === TokenType.DOUBLE || t === TokenType.STRUCT || t === TokenType.ENUM || t === TokenType.UNION || t === TokenType.UNSIGNED) return true;
     if (t === TokenType.IDENTIFIER && typedefs.has(current().value)) return true;
     return false;
   }
@@ -76,6 +76,8 @@ export function parse(tokens: Token[]): Program {
     if (tok.type === TokenType.VOID) { pos++; return "void"; }
     if (tok.type === TokenType.CHAR) { pos++; return "char"; }
     if (tok.type === TokenType.LONG) { pos++; return "long"; }
+    if (tok.type === TokenType.FLOAT) { pos++; return "float"; }
+    if (tok.type === TokenType.DOUBLE) { pos++; return "double"; }
     if (tok.type === TokenType.UNSIGNED) {
       pos++;
       if (current().type === TokenType.CHAR) { pos++; return "unsigned char"; }
@@ -402,7 +404,14 @@ export function parse(tokens: Token[]): Program {
 
     if (tok.type === TokenType.NUMBER) {
       pos++;
-      return { type: "IntegerLiteral", value: parseInt(tok.value, 10) };
+      const raw = tok.value;
+      const hasFloat = raw.endsWith("f") || raw.endsWith("F");
+      const numStr = hasFloat ? raw.slice(0, -1) : raw;
+      const isFloating = numStr.includes(".") || numStr.includes("e") || numStr.includes("E") || hasFloat;
+      if (isFloating) {
+        return { type: "FloatingLiteral", value: parseFloat(numStr), isFloat: hasFloat };
+      }
+      return { type: "IntegerLiteral", value: parseInt(numStr, 10) };
     }
 
     if (tok.type === TokenType.STRING) {
@@ -495,7 +504,7 @@ export function parse(tokens: Token[]): Program {
   /** Check if position has a type specifier token */
   function isTypeSpecAtPos(p: number): boolean {
     const t = tokens[p].type;
-    if (t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG || t === TokenType.STRUCT || t === TokenType.ENUM || t === TokenType.UNION || t === TokenType.UNSIGNED) return true;
+    if (t === TokenType.INT || t === TokenType.VOID || t === TokenType.CHAR || t === TokenType.LONG || t === TokenType.FLOAT || t === TokenType.DOUBLE || t === TokenType.STRUCT || t === TokenType.ENUM || t === TokenType.UNION || t === TokenType.UNSIGNED) return true;
     if (t === TokenType.IDENTIFIER && typedefs.has(tokens[p].value)) return true;
     return false;
   }

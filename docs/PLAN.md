@@ -384,15 +384,15 @@ int main() {
     return (int)(f + (float)d);
 }
 ```
-- [ ] `float` type (WASM `f32`)
-- [ ] `double` type (WASM `f64`)
-- [ ] Floating-point literals (`3.14`, `3.14f`)
-- [ ] FP arithmetic (`+`, `-`, `*`, `/`)
-- [ ] FP comparisons (`<`, `>`, `<=`, `>=`, `==`, `!=`)
-- [ ] Casts between int/float/double (`(int)3.14`, `(double)42`)
-- [ ] Implicit promotion in mixed expressions (int+double → double)
-- [ ] `sizeof(float)` = 4, `sizeof(double)` = 8
-- [ ] FP function parameters and return types
+- [x] `float` type (WASM `f32`)
+- [x] `double` type (WASM `f64`)
+- [x] Floating-point literals (`3.14`, `3.14f`)
+- [x] FP arithmetic (`+`, `-`, `*`, `/`)
+- [x] FP comparisons (`<`, `>`, `<=`, `>=`, `==`, `!=`)
+- [x] Casts between int/float/double (`(int)3.14`, `(double)42`)
+- [x] Implicit promotion in mixed expressions (int+double → double)
+- [x] `sizeof(float)` = 4, `sizeof(double)` = 8
+- [x] FP function parameters and return types
 
 ### Milestone 20: short, const, volatile, storage classes
 ```c

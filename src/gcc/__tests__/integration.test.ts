@@ -262,10 +262,10 @@ describe("integration: compile() end-to-end", () => {
       expect((instance.exports.main as () => number)()).toBe(20);
     });
 
-    it("nested function calls: double(double(3)) = 12", async () => {
+    it("nested function calls: twice(twice(3)) = 12", async () => {
       const source = `
-        int double(int x) { return x + x; }
-        int main() { return double(double(3)); }
+        int twice(int x) { return x + x; }
+        int main() { return twice(twice(3)); }
       `;
       const instance = await compileAndInstantiate(source);
       expect((instance.exports.main as () => number)()).toBe(12);
@@ -2782,6 +2782,256 @@ describe("integration: compile() end-to-end", () => {
       `;
       const instance = await compileAndInstantiate(source);
       expect((instance.exports.main as () => number)()).toBe(8);
+    });
+  });
+
+  describe("floating-point support (milestone 19)", () => {
+    it("float arithmetic: 3.14f + 1.0f ≈ 4.14", async () => {
+      const source = `
+        float add_floats() { return 3.14f + 1.0f; }
+        int main() { return (int)add_floats(); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(4);
+    });
+
+    it("double arithmetic: 2.718 * 2.0", async () => {
+      const source = `
+        double mul_doubles() { return 2.718 * 2.0; }
+        int main() { return (int)mul_doubles(); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("float variable declaration and use", async () => {
+      const source = `
+        int main() {
+          float x = 3.5f;
+          float y = 2.5f;
+          return (int)(x + y);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(6);
+    });
+
+    it("double variable declaration and use", async () => {
+      const source = `
+        int main() {
+          double x = 10.7;
+          double y = 2.3;
+          return (int)(x + y);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(13);
+    });
+
+    it("mixed int + float promotion", async () => {
+      const source = `
+        int main() {
+          int a = 3;
+          float b = 2.5f;
+          return (int)(a + b);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("mixed int + double promotion", async () => {
+      const source = `
+        int main() {
+          int a = 7;
+          double b = 3.9;
+          return (int)(a + b);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+
+    it("cast (int)3.14 = 3", async () => {
+      const source = `int main() { return (int)3.14; }`;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+
+    it("cast (double)42 back to int", async () => {
+      const source = `int main() { return (int)(double)42; }`;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("cast float to double and back", async () => {
+      const source = `
+        int main() {
+          float f = 7.5f;
+          double d = (double)f;
+          return (int)d;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+
+    it("float function params and return", async () => {
+      const source = `
+        float add(float a, float b) { return a + b; }
+        int main() { return (int)add(2.5f, 3.5f); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(6);
+    });
+
+    it("double function params and return", async () => {
+      const source = `
+        double mul(double a, double b) { return a * b; }
+        int main() { return (int)mul(3.0, 4.0); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(12);
+    });
+
+    it("sizeof(float) = 4, sizeof(double) = 8", async () => {
+      const source = `
+        int main() { return sizeof(float) + sizeof(double); }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(12);
+    });
+
+    it("float comparison operators", async () => {
+      const source = `
+        int main() {
+          float a = 3.0f;
+          float b = 5.0f;
+          int result = 0;
+          if (a < b) result = result + 1;
+          if (b > a) result = result + 2;
+          if (a <= 3.0f) result = result + 4;
+          if (b >= 5.0f) result = result + 8;
+          if (a != b) result = result + 16;
+          return result;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(31);
+    });
+
+    it("double comparison operators", async () => {
+      const source = `
+        int main() {
+          double a = 1.5;
+          double b = 1.5;
+          if (a == b) return 1;
+          return 0;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(1);
+    });
+
+    it("float negation", async () => {
+      const source = `
+        int main() {
+          float x = 5.0f;
+          return (int)(-x);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(-5);
+    });
+
+    it("double in for loop condition", async () => {
+      const source = `
+        int main() {
+          int sum = 0;
+          for (double d = 0.0; d < 5.0; d = d + 1.0) {
+            sum = sum + 1;
+          }
+          return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("float in while loop condition", async () => {
+      const source = `
+        int main() {
+          float f = 10.0f;
+          int count = 0;
+          while (f > 0.5f) {
+            f = f - 3.0f;
+            count = count + 1;
+          }
+          return count;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(4);
+    });
+
+    it("float compound assignment += -=", async () => {
+      const source = `
+        int main() {
+          float x = 10.0f;
+          x += 5.0f;
+          x -= 3.0f;
+          return (int)x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(12);
+    });
+
+    it("double ternary expression", async () => {
+      const source = `
+        int main() {
+          double x = 3.0;
+          double y = x > 2.0 ? 10.0 : 20.0;
+          return (int)y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+
+    it("float logical operators && ||", async () => {
+      const source = `
+        int main() {
+          float a = 1.0f;
+          float b = 0.0f;
+          int r = 0;
+          if (a && !b) r = r + 1;
+          if (a || b) r = r + 2;
+          if (!(b && a)) r = r + 4;
+          return r;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+
+    it("milestone target: sqrt_approx", async () => {
+      const source = `
+        double sqrt_approx(double x) {
+          double guess = x / 2.0;
+          for (int i = 0; i < 20; i = i + 1) {
+            guess = (guess + x / guess) / 2.0;
+          }
+          return guess;
+        }
+        int main() {
+          float f = 3.14f;
+          double d = 2.718281828;
+          return (int)(f + (float)d);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(5);
     });
   });
 });

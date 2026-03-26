@@ -151,27 +151,29 @@ const wasmBytes = generate(ast);
 
 ---
 
-## Supported C Subset (through Milestone 16)
+## Supported C Subset (through Milestone 19)
 
 ### Types
 - `int` (32-bit signed), `char` (8-bit signed), `long` (64-bit signed), `void`
 - `unsigned int`, `unsigned char`
+- `float` (32-bit IEEE 754), `double` (64-bit IEEE 754)
 - `enum` declarations with auto-increment and explicit values
 - `typedef` type aliases
 - `union` (overlapping memory layout)
-- Type casting: `(int)expr`, `(char)expr`, `(long)expr`, `(unsigned int)expr`
-- `sizeof(type)` — compile-time constant (char=1, int=4, long=8, union=max field)
-- Implicit promotion in mixed expressions (int+long → long, signed+unsigned → unsigned)
+- Type casting: `(int)expr`, `(char)expr`, `(long)expr`, `(float)expr`, `(double)expr`, `(unsigned int)expr`
+- `sizeof(type)` — compile-time constant (char=1, int=4, float=4, long=8, double=8, union=max field)
+- Implicit promotion in mixed expressions (char < int < long < float < double)
 
 ### Literals
 - Integer: `42`, `0`, `-1`
+- Floating-point: `3.14`, `3.14f`, `1e5`, `2.5e-3f`, `.5`
 - Character: `'A'`, `'\n'`, `'\0'`, `'\t'`
 - String: `"hello\n"`
 
 ### Declarations
 - Functions: `int add(int a, int b) { ... }`
 - Extern functions: `int printf(int ptr);`
-- Local variables: `int x = 10;`, `char c = 'A';`, `long big = 100000;`
+- Local variables: `int x = 10;`, `char c = 'A';`, `long big = 100000;`, `float f = 3.14f;`, `double d = 2.718;`
 - Global variables: `int counter = 0;`
 - Arrays: `int arr[5] = {1, 2, 3, 4, 5};`
 - Pointer variables: `int *p = &x;`

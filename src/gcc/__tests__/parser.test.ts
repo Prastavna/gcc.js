@@ -310,16 +310,16 @@ describe("parser", () => {
 
     it("parses nested function calls", () => {
       const source = `
-        int double(int x) { return x + x; }
-        int main() { return double(double(3)); }
+        int twice(int x) { return x + x; }
+        int main() { return twice(twice(3)); }
       `;
       const ast = parseSource(source);
       const main = ast.declarations[1] as FunctionDeclaration;
       const ret = main.body[0] as ReturnStatement;
       const outer = ret.expression as CallExpression;
-      expect(outer.callee).toBe("double");
+      expect(outer.callee).toBe("twice");
       const inner = outer.args[0] as CallExpression;
-      expect(inner.callee).toBe("double");
+      expect(inner.callee).toBe("twice");
       expect((inner.args[0] as IntegerLiteral).value).toBe(3);
     });
   });
@@ -686,6 +686,59 @@ describe("parser", () => {
       const exprStmt = func.body[0] as any;
       expect(exprStmt.expression.type).toBe("CallExpression");
       expect(exprStmt.expression.args).toHaveLength(2);
+    });
+  });
+
+  describe("floating-point support (milestone 19)", () => {
+    it("parses double literal as FloatingLiteral", () => {
+      const ast = parseSource("int main() { return 3.14; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const ret = func.body[0] as ReturnStatement;
+      expect(ret.expression.type).toBe("FloatingLiteral");
+      expect((ret.expression as any).value).toBeCloseTo(3.14);
+      expect((ret.expression as any).isFloat).toBe(false);
+    });
+
+    it("parses float literal with f suffix", () => {
+      const ast = parseSource("int main() { return 3.14f; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const ret = func.body[0] as ReturnStatement;
+      expect(ret.expression.type).toBe("FloatingLiteral");
+      expect((ret.expression as any).value).toBeCloseTo(3.14);
+      expect((ret.expression as any).isFloat).toBe(true);
+    });
+
+    it("parses float variable declaration", () => {
+      const ast = parseSource("int main() { float x = 1.5f; return 0; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const decl = func.body[0] as any;
+      expect(decl.type).toBe("VariableDeclaration");
+      expect(decl.typeSpec).toBe("float");
+    });
+
+    it("parses double variable declaration", () => {
+      const ast = parseSource("int main() { double x = 1.5; return 0; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const decl = func.body[0] as any;
+      expect(decl.type).toBe("VariableDeclaration");
+      expect(decl.typeSpec).toBe("double");
+    });
+
+    it("parses scientific notation as FloatingLiteral", () => {
+      const ast = parseSource("int main() { return 1e5; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const ret = func.body[0] as ReturnStatement;
+      expect(ret.expression.type).toBe("FloatingLiteral");
+      expect((ret.expression as any).value).toBe(100000);
+      expect((ret.expression as any).isFloat).toBe(false);
+    });
+
+    it("parses float function declaration", () => {
+      const ast = parseSource("float add(float a, float b) { return a; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      expect(func.returnType).toBe("float");
+      expect(func.params[0].typeSpec).toBe("float");
+      expect(func.params[1].typeSpec).toBe("float");
     });
   });
 });

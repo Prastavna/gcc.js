@@ -24,6 +24,8 @@ export const TokenType = {
   UNSIGNED: "UNSIGNED",
   DO: "DO",
   GOTO: "GOTO",
+  FLOAT: "FLOAT",
+  DOUBLE: "DOUBLE",
 
   // Literals
   NUMBER: "NUMBER",
@@ -114,11 +116,17 @@ export interface UnionTypeSpecifier {
   name: string;
 }
 
-export type TypeSpecifier = "int" | "void" | "char" | "long" | "unsigned int" | "unsigned char" | StructTypeSpecifier | UnionTypeSpecifier;
+export type TypeSpecifier = "int" | "void" | "char" | "long" | "float" | "double" | "unsigned int" | "unsigned char" | StructTypeSpecifier | UnionTypeSpecifier;
 
 export interface IntegerLiteral {
   type: "IntegerLiteral";
   value: number;
+}
+
+export interface FloatingLiteral {
+  type: "FloatingLiteral";
+  value: number;
+  isFloat: boolean; // true = float (f32), false = double (f64)
 }
 
 export interface StringLiteral {
@@ -288,6 +296,7 @@ export interface CommaExpression {
 
 export type Expression =
   | IntegerLiteral
+  | FloatingLiteral
   | StringLiteral
   | CharLiteral
   | BinaryExpression

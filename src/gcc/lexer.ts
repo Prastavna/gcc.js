@@ -24,6 +24,8 @@ const KEYWORDS: Record<string, TokenType> = {
   unsigned: TokenType.UNSIGNED,
   do: TokenType.DO,
   goto: TokenType.GOTO,
+  float: TokenType.FLOAT,
+  double: TokenType.DOUBLE,
 };
 
 const SIMPLE_TOKENS: Record<string, TokenType> = {
@@ -266,24 +268,59 @@ export function tokenize(source: string): Token[] {
       pos++; col++; continue;
     }
 
-    const simpleType = SIMPLE_TOKENS[ch];
-    if (simpleType !== undefined) {
-      tokens.push({ type: simpleType, value: ch, line, col });
-      pos++;
-      col++;
-      continue;
-    }
-
-    // Number literals
-    if (isDigit(ch)) {
+    // Number literals (integer and floating-point)
+    // Check before SIMPLE_TOKENS so ".5" is a number, not DOT + 5
+    if (isDigit(ch) || (ch === "." && pos + 1 < source.length && isDigit(source[pos + 1]))) {
       const startCol = col;
       let value = "";
+      // Integer part
       while (pos < source.length && isDigit(source[pos])) {
         value += source[pos];
         pos++;
         col++;
       }
+      // Fractional part
+      if (pos < source.length && source[pos] === "." && (pos + 1 >= source.length || source[pos + 1] !== ".")) {
+        value += source[pos];
+        pos++;
+        col++;
+        while (pos < source.length && isDigit(source[pos])) {
+          value += source[pos];
+          pos++;
+          col++;
+        }
+      }
+      // Exponent part
+      if (pos < source.length && (source[pos] === "e" || source[pos] === "E")) {
+        value += source[pos];
+        pos++;
+        col++;
+        if (pos < source.length && (source[pos] === "+" || source[pos] === "-")) {
+          value += source[pos];
+          pos++;
+          col++;
+        }
+        while (pos < source.length && isDigit(source[pos])) {
+          value += source[pos];
+          pos++;
+          col++;
+        }
+      }
+      // Float suffix (f/F)
+      if (pos < source.length && (source[pos] === "f" || source[pos] === "F")) {
+        value += source[pos];
+        pos++;
+        col++;
+      }
       tokens.push({ type: TokenType.NUMBER, value, line, col: startCol });
+      continue;
+    }
+
+    const simpleType = SIMPLE_TOKENS[ch];
+    if (simpleType !== undefined) {
+      tokens.push({ type: simpleType, value: ch, line, col });
+      pos++;
+      col++;
       continue;
     }
 

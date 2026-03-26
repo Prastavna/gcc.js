@@ -580,4 +580,46 @@ describe("lexer", () => {
       ]);
     });
   });
+
+  describe("floating-point literals (milestone 19)", () => {
+    it("tokenizes float keyword", () => {
+      const tokens = tokenize("float x;");
+      expect(tokens[0].type).toBe(TokenType.FLOAT);
+    });
+
+    it("tokenizes double keyword", () => {
+      const tokens = tokenize("double x;");
+      expect(tokens[0].type).toBe(TokenType.DOUBLE);
+    });
+
+    it("tokenizes decimal float literal 3.14", () => {
+      const tokens = tokenize("3.14");
+      expect(tokens[0].type).toBe(TokenType.NUMBER);
+      expect(tokens[0].value).toBe("3.14");
+    });
+
+    it("tokenizes float literal with f suffix 3.14f", () => {
+      const tokens = tokenize("3.14f");
+      expect(tokens[0].type).toBe(TokenType.NUMBER);
+      expect(tokens[0].value).toBe("3.14f");
+    });
+
+    it("tokenizes scientific notation 1e5", () => {
+      const tokens = tokenize("1e5");
+      expect(tokens[0].type).toBe(TokenType.NUMBER);
+      expect(tokens[0].value).toBe("1e5");
+    });
+
+    it("tokenizes scientific notation with sign 2.5e-3f", () => {
+      const tokens = tokenize("2.5e-3f");
+      expect(tokens[0].type).toBe(TokenType.NUMBER);
+      expect(tokens[0].value).toBe("2.5e-3f");
+    });
+
+    it("tokenizes .5 leading dot", () => {
+      const tokens = tokenize(".5");
+      expect(tokens[0].type).toBe(TokenType.NUMBER);
+      expect(tokens[0].value).toBe(".5");
+    });
+  });
 });

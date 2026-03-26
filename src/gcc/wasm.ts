@@ -101,6 +101,7 @@ export const Op = {
   END: 0x0b,
   BR: 0x0c,
   BR_IF: 0x0d,
+  BR_TABLE: 0x0e,
   RETURN: 0x0f,
   CALL: 0x10,
 

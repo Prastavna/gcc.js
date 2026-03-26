@@ -22,6 +22,8 @@ export const TokenType = {
   TYPEDEF: "TYPEDEF",
   UNION: "UNION",
   UNSIGNED: "UNSIGNED",
+  DO: "DO",
+  GOTO: "GOTO",
 
   // Literals
   NUMBER: "NUMBER",
@@ -278,6 +280,12 @@ export interface ArrowAssignmentExpression {
   value: Expression;
 }
 
+/** (a, b, c) — evaluates all, returns last */
+export interface CommaExpression {
+  type: "CommaExpression";
+  expressions: Expression[];
+}
+
 export type Expression =
   | IntegerLiteral
   | StringLiteral
@@ -301,7 +309,8 @@ export type Expression =
   | MemberAccessExpression
   | MemberAssignmentExpression
   | ArrowAccessExpression
-  | ArrowAssignmentExpression;
+  | ArrowAssignmentExpression
+  | CommaExpression;
 
 export interface ReturnStatement {
   type: "ReturnStatement";
@@ -358,6 +367,23 @@ export interface ContinueStatement {
   type: "ContinueStatement";
 }
 
+export interface DoWhileStatement {
+  type: "DoWhileStatement";
+  condition: Expression;
+  body: Statement[];
+}
+
+export interface GotoStatement {
+  type: "GotoStatement";
+  label: string;
+}
+
+export interface LabeledStatement {
+  type: "LabeledStatement";
+  label: string;
+  body: Statement;
+}
+
 export interface SwitchCase {
   value: Expression | null; // null for default
   body: Statement[];
@@ -384,9 +410,12 @@ export type Statement =
   | IfStatement
   | WhileStatement
   | ForStatement
+  | DoWhileStatement
   | BreakStatement
   | ContinueStatement
-  | SwitchStatement;
+  | SwitchStatement
+  | GotoStatement
+  | LabeledStatement;
 
 export interface Parameter {
   type: "Parameter";

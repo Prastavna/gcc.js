@@ -641,4 +641,51 @@ describe("parser", () => {
       expect(func.params[0].name).toBe("p");
     });
   });
+
+  describe("milestone 18: do-while, goto, comma operator", () => {
+    it("parses do-while statement", () => {
+      const ast = parseSource("int main() { do { return 1; } while (1); }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const doWhile = func.body[0] as any;
+      expect(doWhile.type).toBe("DoWhileStatement");
+      expect(doWhile.body).toHaveLength(1);
+      expect(doWhile.body[0].type).toBe("ReturnStatement");
+      expect(doWhile.condition.type).toBe("IntegerLiteral");
+    });
+
+    it("parses goto statement", () => {
+      const ast = parseSource("int main() { goto done; return 0; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const gotoStmt = func.body[0] as any;
+      expect(gotoStmt.type).toBe("GotoStatement");
+      expect(gotoStmt.label).toBe("done");
+    });
+
+    it("parses labeled statement", () => {
+      const ast = parseSource("int main() { done: return 0; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const labeled = func.body[0] as any;
+      expect(labeled.type).toBe("LabeledStatement");
+      expect(labeled.label).toBe("done");
+      expect(labeled.body.type).toBe("ReturnStatement");
+    });
+
+    it("parses comma expression", () => {
+      const ast = parseSource("int main() { int x = (1, 2, 3); return x; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const decl = func.body[0] as any;
+      expect(decl.type).toBe("VariableDeclaration");
+      // The initializer is the parenthesized comma expression
+      expect(decl.initializer.type).toBe("CommaExpression");
+      expect(decl.initializer.expressions).toHaveLength(3);
+    });
+
+    it("comma does not affect function arguments", () => {
+      const ast = parseSource("int main() { add(1, 2); return 0; }");
+      const func = ast.declarations[0] as FunctionDeclaration;
+      const exprStmt = func.body[0] as any;
+      expect(exprStmt.expression.type).toBe("CallExpression");
+      expect(exprStmt.expression.args).toHaveLength(2);
+    });
+  });
 });

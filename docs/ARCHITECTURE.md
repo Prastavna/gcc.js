@@ -217,7 +217,9 @@ The heap pointer global is initialized to `max(nextStaticAddr, 8)`, ensuring the
 |----------------|-------------------|
 | `if/else`      | `if (void) ... else ... end` |
 | `while`        | `block { loop { br_if, ..., br 0, end } end }` |
+| `do-while`     | `block { loop { block { body } cond; br_if 0; end } end }` |
 | `for`          | Desugared to init + while pattern |
+| `goto`/labels  | State machine: `loop { block { ... br_table dispatch } }` |
 | `return`       | `return` opcode (early return from anywhere) |
 
 ### Key helper: LEB128 encoding

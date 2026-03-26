@@ -187,12 +187,15 @@ const wasmBytes = generate(ast);
 - Pointers: `&x`, `*p`, `*p = val`
 - Arrays: `arr[i]`, `arr[i] = val`
 - Function calls: `add(3, 4)`
+- Comma operator: `(a, b, c)` — evaluates all, returns last
 
 ### Statements
 - `return expr;`
 - `if (cond) { ... } else { ... }`
 - `while (cond) { ... }`
+- `do { ... } while (cond);`
 - `for (init; cond; update) { ... }`
+- `goto label;` and `label: statement`
 
 ### Preprocessor
 - `#define NAME value` — object-like macro

@@ -22,6 +22,8 @@ const KEYWORDS: Record<string, TokenType> = {
   typedef: TokenType.TYPEDEF,
   union: TokenType.UNION,
   unsigned: TokenType.UNSIGNED,
+  do: TokenType.DO,
+  goto: TokenType.GOTO,
 };
 
 const SIMPLE_TOKENS: Record<string, TokenType> = {

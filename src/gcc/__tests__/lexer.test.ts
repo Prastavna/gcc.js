@@ -542,4 +542,42 @@ describe("lexer", () => {
       ]);
     });
   });
+
+  describe("milestone 18: do, goto keywords", () => {
+    it("tokenizes do keyword", () => {
+      const tokens = tokenize("do");
+      expect(tokens[0].type).toBe(TokenType.DO);
+    });
+
+    it("tokenizes goto keyword", () => {
+      const tokens = tokenize("goto");
+      expect(tokens[0].type).toBe(TokenType.GOTO);
+    });
+
+    it("tokenizes do-while statement", () => {
+      const tokens = tokenize("do { x = 1; } while (x < 5);");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.DO, TokenType.LBRACE, TokenType.IDENTIFIER, TokenType.EQUALS,
+        TokenType.NUMBER, TokenType.SEMICOLON, TokenType.RBRACE, TokenType.WHILE,
+        TokenType.LPAREN, TokenType.IDENTIFIER, TokenType.LT, TokenType.NUMBER,
+        TokenType.RPAREN, TokenType.SEMICOLON,
+      ]);
+    });
+
+    it("tokenizes goto statement", () => {
+      const tokens = tokenize("goto done;");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([TokenType.GOTO, TokenType.IDENTIFIER, TokenType.SEMICOLON]);
+    });
+
+    it("tokenizes label", () => {
+      const tokens = tokenize("done: return 0;");
+      const types = tokens.filter(t => t.type !== TokenType.EOF).map(t => t.type);
+      expect(types).toEqual([
+        TokenType.IDENTIFIER, TokenType.COLON, TokenType.RETURN,
+        TokenType.NUMBER, TokenType.SEMICOLON,
+      ]);
+    });
+  });
 });

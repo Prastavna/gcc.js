@@ -364,9 +364,9 @@ done:
     return i + x;
 }
 ```
-- [ ] `do { ... } while (cond);` loop
-- [ ] Comma operator (`(a, b, c)` — evaluates all, returns last)
-- [ ] `goto` and labels (`goto done; ... done:`)
+- [x] `do { ... } while (cond);` loop
+- [x] Comma operator (`(a, b, c)` — evaluates all, returns last)
+- [x] `goto` and labels (`goto done; ... done:`)
 
 ### Milestone 19: Floating point
 ```c

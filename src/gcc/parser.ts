@@ -117,7 +117,16 @@ export function parse(tokens: Token[]): Program {
   // ── Expression parsing (precedence climbing) ───────────
 
   function parseExpression(): Expression {
-    return parseAssignment();
+    let expr = parseAssignment();
+    if (current().type === TokenType.COMMA) {
+      const expressions: Expression[] = [expr];
+      while (current().type === TokenType.COMMA) {
+        pos++;
+        expressions.push(parseAssignment());
+      }
+      return { type: "CommaExpression", expressions };
+    }
+    return expr;
   }
 
   function parseAssignment(): Expression {
@@ -447,10 +456,10 @@ export function parse(tokens: Token[]): Program {
         pos++;
         const args: Expression[] = [];
         if (current().type !== TokenType.RPAREN) {
-          args.push(parseExpression());
+          args.push(parseAssignment());
           while (current().type === TokenType.COMMA) {
             pos++;
-            args.push(parseExpression());
+            args.push(parseAssignment());
           }
         }
         expect(TokenType.RPAREN, "')' after function arguments");
@@ -622,10 +631,10 @@ export function parse(tokens: Token[]): Program {
         expect(TokenType.LBRACE, "'{' for array initializer");
         initializer = [];
         if (current().type !== TokenType.RBRACE) {
-          initializer.push(parseExpression());
+          initializer.push(parseAssignment());
           while (current().type === TokenType.COMMA) {
             pos++;
-            initializer.push(parseExpression());
+            initializer.push(parseAssignment());
           }
         }
         expect(TokenType.RBRACE, "'}' after array initializer");
@@ -681,6 +690,18 @@ export function parse(tokens: Token[]): Program {
       return { type: "WhileStatement", condition, body };
     }
 
+    // Do-while statement: do { ... } while (cond);
+    if (current().type === TokenType.DO) {
+      pos++;
+      const body = parseBlockOrStatement();
+      expect(TokenType.WHILE, "'while' after do body");
+      expect(TokenType.LPAREN, "'(' after 'while' in do-while");
+      const condition = parseExpression();
+      expect(TokenType.RPAREN, "')' after do-while condition");
+      expect(TokenType.SEMICOLON, "';' after do-while");
+      return { type: "DoWhileStatement", condition, body };
+    }
+
     // For statement: for (init; condition; update) body
     if (current().type === TokenType.FOR) {
       pos++;
@@ -725,6 +746,23 @@ export function parse(tokens: Token[]): Program {
       pos++;
       expect(TokenType.SEMICOLON, "';' after 'continue'");
       return { type: "ContinueStatement" };
+    }
+
+    // Goto statement
+    if (current().type === TokenType.GOTO) {
+      pos++;
+      const label = expect(TokenType.IDENTIFIER, "label name after 'goto'").value;
+      expect(TokenType.SEMICOLON, "';' after goto");
+      return { type: "GotoStatement", label };
+    }
+
+    // Labeled statement: ident ':' statement
+    // At statement level, ident followed by ':' is always a label (not ternary)
+    if (current().type === TokenType.IDENTIFIER && peek(1).type === TokenType.COLON) {
+      const label = current().value;
+      pos += 2; // skip ident and ':'
+      const body = parseStatement();
+      return { type: "LabeledStatement", label, body };
     }
 
     // Switch statement

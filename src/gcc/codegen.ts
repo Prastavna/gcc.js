@@ -321,8 +321,16 @@ function collectStringsFromStatement(stmt: Statement, cb: (s: string) => void): 
       collectStringsFromExpr(stmt.update, cb);
       collectStringsFromStatements(stmt.body, cb);
       break;
+    case "DoWhileStatement":
+      collectStringsFromExpr(stmt.condition, cb);
+      collectStringsFromStatements(stmt.body, cb);
+      break;
     case "BreakStatement": break;
     case "ContinueStatement": break;
+    case "GotoStatement": break;
+    case "LabeledStatement":
+      collectStringsFromStatement(stmt.body, cb);
+      break;
     case "SwitchStatement":
       collectStringsFromExpr(stmt.discriminant, cb);
       for (const c of stmt.cases) collectStringsFromStatements(c.body, cb);
@@ -347,6 +355,7 @@ function collectStringsFromExpr(expr: Expression, cb: (s: string) => void): void
     case "CastExpression": collectStringsFromExpr(expr.operand, cb); break;
     case "MemberAssignmentExpression": collectStringsFromExpr(expr.value, cb); break;
     case "ArrowAssignmentExpression": collectStringsFromExpr(expr.value, cb); break;
+    case "CommaExpression": expr.expressions.forEach(e => collectStringsFromExpr(e, cb)); break;
     default: break;
   }
 }
@@ -377,11 +386,14 @@ function stmtUsesMemory(stmt: Statement): boolean {
       return exprUsesMemory(stmt.condition) || statementsUseMemory(stmt.consequent) ||
         (stmt.alternate ? statementsUseMemory(stmt.alternate) : false);
     case "WhileStatement": return exprUsesMemory(stmt.condition) || statementsUseMemory(stmt.body);
+    case "DoWhileStatement": return exprUsesMemory(stmt.condition) || statementsUseMemory(stmt.body);
     case "ForStatement":
       return stmtUsesMemory(stmt.init) || exprUsesMemory(stmt.condition) ||
         exprUsesMemory(stmt.update) || statementsUseMemory(stmt.body);
     case "BreakStatement": return false;
     case "ContinueStatement": return false;
+    case "GotoStatement": return false;
+    case "LabeledStatement": return stmtUsesMemory(stmt.body);
     case "SwitchStatement":
       return exprUsesMemory(stmt.discriminant) || stmt.cases.some(c => statementsUseMemory(c.body));
   }
@@ -401,6 +413,7 @@ function exprUsesMemory(expr: Expression): boolean {
     case "LogicalExpression": return exprUsesMemory(expr.left) || exprUsesMemory(expr.right);
     case "TernaryExpression": return exprUsesMemory(expr.condition) || exprUsesMemory(expr.consequent) || exprUsesMemory(expr.alternate);
     case "CastExpression": return exprUsesMemory(expr.operand);
+    case "CommaExpression": return expr.expressions.some(exprUsesMemory);
     default: return false;
   }
 }
@@ -613,6 +626,10 @@ function findATInStatement(stmt: Statement, taken: Set<string>): void {
       findATInExpr(stmt.condition, taken);
       findATInStatements(stmt.body, taken);
       break;
+    case "DoWhileStatement":
+      findATInExpr(stmt.condition, taken);
+      findATInStatements(stmt.body, taken);
+      break;
     case "ForStatement":
       findATInStatement(stmt.init, taken);
       findATInExpr(stmt.condition, taken);
@@ -621,6 +638,10 @@ function findATInStatement(stmt: Statement, taken: Set<string>): void {
       break;
     case "BreakStatement": break;
     case "ContinueStatement": break;
+    case "GotoStatement": break;
+    case "LabeledStatement":
+      findATInStatement(stmt.body, taken);
+      break;
     case "SwitchStatement":
       findATInExpr(stmt.discriminant, taken);
       for (const c of stmt.cases) findATInStatements(c.body, taken);
@@ -645,6 +666,7 @@ function findATInExpr(expr: Expression, taken: Set<string>): void {
     case "CastExpression": findATInExpr(expr.operand, taken); break;
     case "MemberAssignmentExpression": findATInExpr(expr.value, taken); break;
     case "ArrowAssignmentExpression": findATInExpr(expr.value, taken); break;
+    case "CommaExpression": expr.expressions.forEach(e => findATInExpr(e, taken)); break;
     default: break;
   }
 }
@@ -672,6 +694,9 @@ type Ctx = {
   continueDepth: number | null; // BR depth for continue (null = not in a loop)
   switchTmpIdx: number | null; // local index for switch temp variable
   returnType: CType;
+  gotoStateIdx: number | null; // local index for goto state variable (null = no goto)
+  gotoLabels: Map<string, number>; // label name -> section index
+  gotoDispatchDepth: number | null; // BR depth to reach the dispatch loop
 };
 
 
@@ -681,8 +706,10 @@ function collectAllVarNames(stmts: Statement[], names: Set<string>): void {
     if (s.type === "StructVariableDeclaration") names.add(s.name);
     if (s.type === "IfStatement") { collectAllVarNames(s.consequent, names); if (s.alternate) collectAllVarNames(s.alternate, names); }
     if (s.type === "WhileStatement") collectAllVarNames(s.body, names);
+    if (s.type === "DoWhileStatement") collectAllVarNames(s.body, names);
     if (s.type === "ForStatement") { collectAllVarNames([s.init], names); collectAllVarNames(s.body, names); }
     if (s.type === "SwitchStatement") { for (const c of s.cases) collectAllVarNames(c.body, names); }
+    if (s.type === "LabeledStatement") collectAllVarNames([s.body], names);
   }
 }
 
@@ -692,8 +719,10 @@ function collectVarTypes(stmts: Statement[], types: Map<string, CType>): void {
     if (s.type === "VariableDeclaration") types.set(s.name, typeSpecToCType(s.typeSpec || "int"));
     if (s.type === "IfStatement") { collectVarTypes(s.consequent, types); if (s.alternate) collectVarTypes(s.alternate, types); }
     if (s.type === "WhileStatement") collectVarTypes(s.body, types);
+    if (s.type === "DoWhileStatement") collectVarTypes(s.body, types);
     if (s.type === "ForStatement") { collectVarTypes([s.init], types); collectVarTypes(s.body, types); }
     if (s.type === "SwitchStatement") { for (const c of s.cases) collectVarTypes(c.body, types); }
+    if (s.type === "LabeledStatement") collectVarTypes([s.body], types);
   }
 }
 
@@ -738,8 +767,10 @@ function buildFunctionBody(
       }
       if (stmt.type === "IfStatement") { collectDeclaredVars(stmt.consequent); if (stmt.alternate) collectDeclaredVars(stmt.alternate); }
       else if (stmt.type === "WhileStatement") collectDeclaredVars(stmt.body);
+      else if (stmt.type === "DoWhileStatement") collectDeclaredVars(stmt.body);
       else if (stmt.type === "ForStatement") { collectDeclaredVars([stmt.init]); collectDeclaredVars(stmt.body); }
       else if (stmt.type === "SwitchStatement") { for (const c of stmt.cases) collectDeclaredVars(c.body); }
+      else if (stmt.type === "LabeledStatement") collectDeclaredVars([stmt.body]);
     }
   }
   collectDeclaredVars(func.body);
@@ -750,7 +781,9 @@ function buildFunctionBody(
       if (s.type === "SwitchStatement") return true;
       if (s.type === "IfStatement" && (hasSwitchStmt(s.consequent) || (s.alternate && hasSwitchStmt(s.alternate)))) return true;
       if (s.type === "WhileStatement" && hasSwitchStmt(s.body)) return true;
+      if (s.type === "DoWhileStatement" && hasSwitchStmt(s.body)) return true;
       if (s.type === "ForStatement" && hasSwitchStmt(s.body)) return true;
+      if (s.type === "LabeledStatement" && hasSwitchStmt([s.body])) return true;
     }
     return false;
   }
@@ -821,8 +854,10 @@ function buildFunctionBody(
       }
       if (s.type === "IfStatement") { collectArrayDecls(s.consequent); if (s.alternate) collectArrayDecls(s.alternate); }
       if (s.type === "WhileStatement") collectArrayDecls(s.body);
+      if (s.type === "DoWhileStatement") collectArrayDecls(s.body);
       if (s.type === "ForStatement") { collectArrayDecls([s.init]); collectArrayDecls(s.body); }
       if (s.type === "SwitchStatement") { for (const c of s.cases) collectArrayDecls(c.body); }
+      if (s.type === "LabeledStatement") collectArrayDecls([s.body]);
     }
   }
   collectArrayDecls(func.body);
@@ -842,8 +877,10 @@ function buildFunctionBody(
       }
       if (s.type === "IfStatement") { collectStructDecls(s.consequent); if (s.alternate) collectStructDecls(s.alternate); }
       if (s.type === "WhileStatement") collectStructDecls(s.body);
+      if (s.type === "DoWhileStatement") collectStructDecls(s.body);
       if (s.type === "ForStatement") { collectStructDecls([s.init]); collectStructDecls(s.body); }
       if (s.type === "SwitchStatement") { for (const c of s.cases) collectStructDecls(c.body); }
+      if (s.type === "LabeledStatement") collectStructDecls([s.body]);
     }
   }
   collectStructDecls(func.body);
@@ -870,8 +907,10 @@ function buildFunctionBody(
       }
       if (s.type === "IfStatement") { collectStructPtrTypes(s.consequent); if (s.alternate) collectStructPtrTypes(s.alternate); }
       if (s.type === "WhileStatement") collectStructPtrTypes(s.body);
+      if (s.type === "DoWhileStatement") collectStructPtrTypes(s.body);
       if (s.type === "ForStatement") { collectStructPtrTypes([s.init]); collectStructPtrTypes(s.body); }
       if (s.type === "SwitchStatement") { for (const c of s.cases) collectStructPtrTypes(c.body); }
+      if (s.type === "LabeledStatement") collectStructPtrTypes([s.body]);
     }
   }
   collectStructPtrTypes(func.body);
@@ -890,14 +929,54 @@ function buildFunctionBody(
       }
       if (s.type === "IfStatement") { collectPtrTypes(s.consequent); if (s.alternate) collectPtrTypes(s.alternate); }
       if (s.type === "WhileStatement") collectPtrTypes(s.body);
+      if (s.type === "DoWhileStatement") collectPtrTypes(s.body);
       if (s.type === "ForStatement") { collectPtrTypes([s.init]); collectPtrTypes(s.body); }
       if (s.type === "SwitchStatement") { for (const c of s.cases) collectPtrTypes(c.body); }
+      if (s.type === "LabeledStatement") collectPtrTypes([s.body]);
     }
   }
   collectPtrTypes(func.body);
 
   const returnType = typeSpecToCType(func.returnType || "int");
-  const ctx: Ctx = { locals, localTypes, memVars, memVarTypes, arrayVars, structVars, structParamVars, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, varStructPtrTypes, varPtrTypes, breakDepth: null, continueDepth: null, switchTmpIdx, returnType };
+
+  // Collect goto labels from the function body (top-level only for now)
+  const gotoLabels = new Map<string, number>();
+  function collectLabelsFromStmts(stmts: Statement[]): void {
+    for (const s of stmts) {
+      if (s.type === "LabeledStatement") {
+        gotoLabels.set(s.label, gotoLabels.size);
+        collectLabelsFromStmts([s.body]);
+      }
+      if (s.type === "IfStatement") { collectLabelsFromStmts(s.consequent); if (s.alternate) collectLabelsFromStmts(s.alternate); }
+      if (s.type === "WhileStatement") collectLabelsFromStmts(s.body);
+      if (s.type === "DoWhileStatement") collectLabelsFromStmts(s.body);
+      if (s.type === "ForStatement") collectLabelsFromStmts(s.body);
+      if (s.type === "SwitchStatement") { for (const c of s.cases) collectLabelsFromStmts(c.body); }
+    }
+  }
+  collectLabelsFromStmts(func.body);
+
+  // Detect if function uses goto
+  function hasGotoStmt(stmts: Statement[]): boolean {
+    for (const s of stmts) {
+      if (s.type === "GotoStatement") return true;
+      if (s.type === "IfStatement" && (hasGotoStmt(s.consequent) || (s.alternate && hasGotoStmt(s.alternate)))) return true;
+      if (s.type === "WhileStatement" && hasGotoStmt(s.body)) return true;
+      if (s.type === "DoWhileStatement" && hasGotoStmt(s.body)) return true;
+      if (s.type === "ForStatement" && hasGotoStmt(s.body)) return true;
+      if (s.type === "SwitchStatement" && s.cases.some(c => hasGotoStmt(c.body))) return true;
+      if (s.type === "LabeledStatement" && hasGotoStmt([s.body])) return true;
+    }
+    return false;
+  }
+  const needsGoto = hasGotoStmt(func.body);
+  let gotoStateIdx: number | null = null;
+  if (needsGoto) {
+    gotoStateIdx = nextIdx++;
+    i32Locals.push({ name: "__goto_state", ctype: "int" });
+  }
+
+  const ctx: Ctx = { locals, localTypes, memVars, memVarTypes, arrayVars, structVars, structParamVars, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, varStructPtrTypes, varPtrTypes, breakDepth: null, continueDepth: null, switchTmpIdx, returnType, gotoStateIdx, gotoLabels, gotoDispatchDepth: null };
   const instructions: number[] = [];
 
   for (const ap of atParamCopies) {
@@ -910,7 +989,12 @@ function buildFunctionBody(
     }
   }
 
-  emitStatements(instructions, func.body, ctx);
+  if (needsGoto) {
+    // Emit goto state machine: split body into sections at label boundaries
+    emitGotoStateMachine(instructions, func.body, ctx);
+  } else {
+    emitStatements(instructions, func.body, ctx);
+  }
 
   // Build local declarations
   const localDeclBytes: number[] = [];
@@ -935,6 +1019,70 @@ function buildFunctionBody(
   }
   const bodyContent = [...localDeclBytes, ...instructions, Op.END];
   return [...encodeUnsignedLEB128(bodyContent.length), ...bodyContent];
+}
+
+// ── Statement emission ───────────────────────────────────
+
+// ── Goto state machine ───────────────────────────────────
+
+function splitAtLabels(stmts: Statement[], labels: Map<string, number>): Statement[][] {
+  const sections: Statement[][] = [[]];
+  for (const s of stmts) {
+    if (s.type === "LabeledStatement" && labels.has(s.label)) {
+      sections.push([]);
+      sections[sections.length - 1].push(s.body);
+    } else {
+      sections[sections.length - 1].push(s);
+    }
+  }
+  return sections;
+}
+
+function emitGotoStateMachine(out: number[], stmts: Statement[], ctx: Ctx): void {
+  const sections = splitAtLabels(stmts, ctx.gotoLabels);
+  const numSections = sections.length;
+
+  // loop $dispatch
+  out.push(Op.LOOP, BLOCK_VOID);
+  // block $exit
+  out.push(Op.BLOCK, BLOCK_VOID);
+  // block $secN-1 ... block $sec0 (innermost = section 0)
+  for (let i = 0; i < numSections; i++) {
+    out.push(Op.BLOCK, BLOCK_VOID);
+  }
+
+  // Dispatch: br_table based on state variable
+  out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(ctx.gotoStateIdx!));
+  out.push(Op.BR_TABLE);
+  out.push(...encodeUnsignedLEB128(numSections)); // number of labels
+  for (let i = 0; i < numSections; i++) {
+    out.push(...encodeUnsignedLEB128(i)); // br to block $sec_i
+  }
+  out.push(...encodeUnsignedLEB128(numSections)); // default: br to $exit
+
+  // Emit sections
+  for (let secIdx = 0; secIdx < numSections; secIdx++) {
+    out.push(Op.END); // end block $sec_i
+
+    // Depth from here to $dispatch loop:
+    // After closing $sec_i, active nesting is:
+    //   loop > block($exit) > block($sec_{i+1}) > ... > block($sec_{numSections-1})
+    // Remaining section blocks: numSections - secIdx - 1
+    // Plus $exit block: 1
+    // Loop is the br target: +0 (loop label index counted from 0)
+    // Total: (numSections - secIdx - 1) + 1 = numSections - secIdx
+    const dispatchDepth = numSections - secIdx;
+
+    const oldDispatch = ctx.gotoDispatchDepth;
+    ctx.gotoDispatchDepth = dispatchDepth;
+
+    for (const s of sections[secIdx]) emitStatement(out, s, ctx);
+
+    ctx.gotoDispatchDepth = oldDispatch;
+  }
+
+  out.push(Op.END); // end block $exit
+  out.push(Op.END); // end loop $dispatch
 }
 
 // ── Statement emission ───────────────────────────────────
@@ -999,12 +1147,15 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       // IF adds one nesting level for break/continue depth
       const oldBreakIf = ctx.breakDepth;
       const oldContinueIf = ctx.continueDepth;
+      const oldGotoIf = ctx.gotoDispatchDepth;
       if (ctx.breakDepth !== null) ctx.breakDepth++;
       if (ctx.continueDepth !== null) ctx.continueDepth++;
+      if (ctx.gotoDispatchDepth !== null) ctx.gotoDispatchDepth++;
       for (const s of stmt.consequent) emitStatement(out, s, ctx);
       if (stmt.alternate) { out.push(Op.ELSE); for (const s of stmt.alternate) emitStatement(out, s, ctx); }
       ctx.breakDepth = oldBreakIf;
       ctx.continueDepth = oldContinueIf;
+      ctx.gotoDispatchDepth = oldGotoIf;
       out.push(Op.END);
       break;
     }
@@ -1013,8 +1164,10 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       out.push(Op.BLOCK, BLOCK_VOID, Op.LOOP, BLOCK_VOID);
       const oldBreakW = ctx.breakDepth;
       const oldContinueW = ctx.continueDepth;
+      const oldGotoW = ctx.gotoDispatchDepth;
       ctx.breakDepth = 1;     // BR 1 exits BLOCK
       ctx.continueDepth = 0;  // BR 0 goes to LOOP start
+      if (ctx.gotoDispatchDepth !== null) ctx.gotoDispatchDepth += 2;
       const condType = emitExpression(out, stmt.condition, ctx);
       if (condType === "long") {
         out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0));
@@ -1024,7 +1177,34 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       for (const s of stmt.body) emitStatement(out, s, ctx);
       ctx.breakDepth = oldBreakW;
       ctx.continueDepth = oldContinueW;
+      ctx.gotoDispatchDepth = oldGotoW;
       out.push(Op.BR, ...encodeUnsignedLEB128(0), Op.END, Op.END);
+      break;
+    }
+    case "DoWhileStatement": {
+      // do { body } while (cond);
+      // Structure: BLOCK(break) { LOOP { BLOCK(continue) { body } cond; br_if loop; } }
+      // continue exits the inner BLOCK → falls through to condition check
+      out.push(Op.BLOCK, BLOCK_VOID, Op.LOOP, BLOCK_VOID);
+      out.push(Op.BLOCK, BLOCK_VOID); // continue target block
+      const oldBreakDW = ctx.breakDepth;
+      const oldContinueDW = ctx.continueDepth;
+      const oldGotoDW = ctx.gotoDispatchDepth;
+      ctx.breakDepth = 2;     // BR 2 exits outer BLOCK (past continue block + loop)
+      ctx.continueDepth = 0;  // BR 0 exits continue block → runs condition
+      if (ctx.gotoDispatchDepth !== null) ctx.gotoDispatchDepth += 3;
+      for (const s of stmt.body) emitStatement(out, s, ctx);
+      ctx.breakDepth = oldBreakDW;
+      ctx.continueDepth = oldContinueDW;
+      ctx.gotoDispatchDepth = oldGotoDW;
+      out.push(Op.END); // end continue block
+      const condTypeDW = emitExpression(out, stmt.condition, ctx);
+      if (condTypeDW === "long") {
+        out.push(Op.I64_CONST, ...encodeSignedLEB128_i64(0));
+        out.push(Op.I64_NE);
+      }
+      out.push(Op.BR_IF, ...encodeUnsignedLEB128(0)); // if true, loop back
+      out.push(Op.END, Op.END); // end loop, end break block
       break;
     }
     case "ForStatement": {
@@ -1042,11 +1222,14 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       out.push(Op.BLOCK, BLOCK_VOID);
       const oldBreakF = ctx.breakDepth;
       const oldContinueF = ctx.continueDepth;
+      const oldGotoF = ctx.gotoDispatchDepth;
       ctx.breakDepth = 2;     // BR 2 exits outer BLOCK (past continue block + loop)
       ctx.continueDepth = 0;  // BR 0 exits continue block → runs update
+      if (ctx.gotoDispatchDepth !== null) ctx.gotoDispatchDepth += 3;
       for (const s of stmt.body) emitStatement(out, s, ctx);
       ctx.breakDepth = oldBreakF;
       ctx.continueDepth = oldContinueF;
+      ctx.gotoDispatchDepth = oldGotoF;
       out.push(Op.END); // end continue block
       emitExpression(out, stmt.update, ctx);
       if (exprProducesValue(stmt.update)) out.push(Op.DROP);
@@ -1061,6 +1244,24 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
     case "ContinueStatement": {
       if (ctx.continueDepth === null) throw new Error("'continue' outside of loop");
       out.push(Op.BR, ...encodeUnsignedLEB128(ctx.continueDepth));
+      break;
+    }
+    case "GotoStatement": {
+      if (ctx.gotoStateIdx === null || ctx.gotoDispatchDepth === null) {
+        throw new Error("'goto' used but goto state machine not initialized");
+      }
+      const targetSection = ctx.gotoLabels.get(stmt.label);
+      if (targetSection === undefined) throw new Error(`Unknown label '${stmt.label}'`);
+      // Set state to target section + 1 (0 = entry section)
+      out.push(Op.I32_CONST, ...encodeSignedLEB128(targetSection + 1));
+      out.push(Op.LOCAL_SET, ...encodeUnsignedLEB128(ctx.gotoStateIdx));
+      out.push(Op.BR, ...encodeUnsignedLEB128(ctx.gotoDispatchDepth));
+      break;
+    }
+    case "LabeledStatement": {
+      // In goto state machine mode, labels are handled by emitGotoStateMachine.
+      // If we reach here, just emit the body statement.
+      emitStatement(out, stmt.body, ctx);
       break;
     }
     case "SwitchStatement": {
@@ -1108,6 +1309,7 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       // Emit case bodies
       const oldBreakS = ctx.breakDepth;
       const oldContinueS = ctx.continueDepth;
+      const oldGotoS = ctx.gotoDispatchDepth;
       for (let i = 0; i < cases.length; i++) {
         out.push(Op.END); // end case i's entry block
         // Inside case i body: (numEntries-1-i) remaining entry blocks + $exit block above us
@@ -1116,10 +1318,14 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
         if (oldContinueS !== null) {
           ctx.continueDepth = oldContinueS + numEntries - i; // remaining entry blocks + $exit
         }
+        if (oldGotoS !== null) {
+          ctx.gotoDispatchDepth = oldGotoS + numEntries - i; // remaining entry blocks + $exit
+        }
         for (const s of cases[i].body) emitStatement(out, s, ctx);
       }
       ctx.breakDepth = oldBreakS;
       ctx.continueDepth = oldContinueS;
+      ctx.gotoDispatchDepth = oldGotoS;
       out.push(Op.END); // end $exit block
       break;
     }
@@ -1140,6 +1346,9 @@ function exprProducesValue(expr: Expression): boolean {
     case "CallExpression":
       // Built-in free returns void (no value on stack)
       return expr.callee !== "free";
+    case "CommaExpression":
+      // The last expression determines if a value is produced
+      return exprProducesValue(expr.expressions[expr.expressions.length - 1]);
     default:
       return true;
   }
@@ -1182,6 +1391,7 @@ function inferType(expr: Expression, ctx: Ctx): CType {
     case "MemberAssignmentExpression": return "void";
     case "ArrowAccessExpression": return "int";
     case "ArrowAssignmentExpression": return "void";
+    case "CommaExpression": return inferType(expr.expressions[expr.expressions.length - 1], ctx);
   }
 }
 
@@ -1790,6 +2000,17 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       emitConversion(out, valType, fieldInfo.ctype);
       emitMemStore(out, fieldInfo.ctype);
       return "void";
+    }
+    case "CommaExpression": {
+      // Evaluate all expressions, drop all but the last
+      let lastType: CType = "void";
+      for (let i = 0; i < expr.expressions.length; i++) {
+        lastType = emitExpression(out, expr.expressions[i], ctx);
+        if (i < expr.expressions.length - 1 && exprProducesValue(expr.expressions[i])) {
+          out.push(Op.DROP);
+        }
+      }
+      return lastType;
     }
   }
 }

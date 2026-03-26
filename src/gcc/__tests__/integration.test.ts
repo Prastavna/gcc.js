@@ -2560,4 +2560,228 @@ describe("integration: compile() end-to-end", () => {
       expect((instance.exports.main as () => number)()).toBe(10);
     });
   });
+
+  // ── Milestone 18: do-while, goto, comma operator ─────────
+
+  describe("do-while loop", () => {
+    it("executes body at least once", async () => {
+      const source = `
+        int main() {
+            int i = 0;
+            do {
+                i = i + 1;
+            } while (i < 5);
+            return i;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("executes body once when condition is false", async () => {
+      const source = `
+        int main() {
+            int x = 10;
+            do {
+                x = x + 1;
+            } while (0);
+            return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(11);
+    });
+
+    it("supports break in do-while", async () => {
+      const source = `
+        int main() {
+            int i = 0;
+            do {
+                i = i + 1;
+                if (i == 3) break;
+            } while (i < 10);
+            return i;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+
+    it("supports continue in do-while", async () => {
+      const source = `
+        int main() {
+            int sum = 0;
+            int i = 0;
+            do {
+                i = i + 1;
+                if (i % 2 == 0) continue;
+                sum = sum + i;
+            } while (i < 6);
+            return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // odd numbers 1-6: 1+3+5 = 9
+      expect((instance.exports.main as () => number)()).toBe(9);
+    });
+
+    it("nested do-while loops", async () => {
+      const source = `
+        int main() {
+            int total = 0;
+            int i = 0;
+            do {
+                int j = 0;
+                do {
+                    total = total + 1;
+                    j = j + 1;
+                } while (j < 3);
+                i = i + 1;
+            } while (i < 4);
+            return total;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(12);
+    });
+  });
+
+  describe("comma operator", () => {
+    it("evaluates all expressions and returns the last", async () => {
+      const source = `
+        int main() {
+            int x = (1, 2, 3);
+            return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(3);
+    });
+
+    it("comma operator with side effects", async () => {
+      const source = `
+        int main() {
+            int x = 0;
+            int y = (x = 10, x + 5);
+            return y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(15);
+    });
+
+    it("comma operator in expression statement", async () => {
+      const source = `
+        int main() {
+            int x = 0;
+            int y = 0;
+            x = 5, y = 10;
+            return x + y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(15);
+    });
+
+    it("comma does not conflict with function args", async () => {
+      const source = `
+        int add(int a, int b) { return a + b; }
+        int main() {
+            return add(3, 4);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+  });
+
+  describe("goto and labels", () => {
+    it("forward goto skips code", async () => {
+      const source = `
+        int main() {
+            int i = 0;
+            goto done;
+            i = 999;
+        done:
+            return i;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(0);
+    });
+
+    it("backward goto creates a loop", async () => {
+      const source = `
+        int main() {
+            int i = 0;
+        loop:
+            i = i + 1;
+            if (i < 5) goto loop;
+            return i;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("multiple labels", async () => {
+      const source = `
+        int main() {
+            int x = 0;
+            goto second;
+        first:
+            x = x + 1;
+            goto end;
+        second:
+            x = x + 10;
+            goto first;
+        end:
+            return x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(11);
+    });
+
+    it("goto with other control flow", async () => {
+      const source = `
+        int main() {
+            int sum = 0;
+            int i = 1;
+        top:
+            if (i > 10) goto done;
+            sum = sum + i;
+            i = i + 1;
+            goto top;
+        done:
+            return sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 1+2+...+10 = 55
+      expect((instance.exports.main as () => number)()).toBe(55);
+    });
+  });
+
+  describe("milestone 18: combined test", () => {
+    it("do-while + comma + goto together", async () => {
+      const source = `
+        int main() {
+            int i = 0;
+            do {
+                i = i + 1;
+            } while (i < 5);
+
+            int x = (1, 2, 3);
+
+            goto done;
+            i = 999;
+        done:
+            return i + x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(8);
+    });
+  });
 });

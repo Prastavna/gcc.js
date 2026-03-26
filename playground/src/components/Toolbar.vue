@@ -125,6 +125,18 @@ const examples: { label: string; code: string }[] = [
     label: 'Typedef + unsigned',
     code: `typedef unsigned int uint;\ntypedef int bool;\n\nbool is_even(uint x) {\n    return (x & 1) == 0;\n}\n\nint main() {\n    uint x = 42;\n    return is_even(x);\n}`,
   },
+  {
+    label: 'Do-while loop',
+    code: `int main() {\n    int i = 0;\n    do {\n        i = i + 1;\n    } while (i < 5);\n    return i;\n}`,
+  },
+  {
+    label: 'Comma operator',
+    code: `int main() {\n    int x = 0;\n    int y = (x = 10, x + 5);\n    return y;\n}`,
+  },
+  {
+    label: 'Goto & labels',
+    code: `int main() {\n    int sum = 0;\n    int i = 1;\ntop:\n    if (i > 10) goto done;\n    sum = sum + i;\n    i = i + 1;\n    goto top;\ndone:\n    return sum;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

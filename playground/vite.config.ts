@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: './',
   plugins: [tailwindcss(), vue()],
   resolve: {
     alias: {

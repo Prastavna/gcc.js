@@ -3900,4 +3900,177 @@ describe("integration: compile() end-to-end", () => {
       expect((instance.exports.main as () => number)()).toBe(16);
     });
   });
+
+  describe("Milestone 26: C89 graduation test", () => {
+    it("anonymous struct typedef with field access", async () => {
+      const source = `
+        typedef struct { int x, y; } Point;
+        int main() {
+            Point p;
+            p.x = 10;
+            p.y = 20;
+            return p.x + p.y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(30);
+    });
+
+    it("named struct typedef with body", async () => {
+      const source = `
+        typedef struct Node { int val; } Node;
+        int main() {
+            Node n;
+            n.val = 42;
+            return n.val;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("multi-declarator struct fields (float x, y)", async () => {
+      const source = `
+        struct Vec2 { float x, y; };
+        int main() {
+            struct Vec2 v;
+            v.x = 3.0f;
+            v.y = 4.0f;
+            return (int)(v.x + v.y);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+
+    it("arrow assign struct value (n->pos = v)", async () => {
+      const source = `
+        typedef struct { int x, y; } Point;
+        struct Node { Point pos; int val; };
+        int main() {
+            struct Node n;
+            Point p;
+            p.x = 10;
+            p.y = 20;
+            n.pos = p;
+            return n.pos.x + n.pos.y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(30);
+    });
+
+    it("arrow assign struct value through pointer", async () => {
+      const source = `
+        typedef struct { int x, y; } Point;
+        struct Node { Point pos; int val; };
+        int main() {
+            struct Node n;
+            struct Node *p = &n;
+            Point pt;
+            pt.x = 5;
+            pt.y = 7;
+            p->pos = pt;
+            return p->pos.x + p->pos.y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(12);
+    });
+
+    it("chained arrow access (cur->next->val)", async () => {
+      const source = `
+        struct Node { int val; struct Node *next; };
+        int main() {
+            struct Node a;
+            struct Node b;
+            a.val = 10;
+            b.val = 20;
+            a.next = &b;
+            b.next = 0;
+            return a.next->val;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(20);
+    });
+
+    it("chained arrow-arrow-member (cur->next->pos.x)", async () => {
+      const source = `
+        typedef struct { float x, y; } Vec2;
+        struct Node { Vec2 pos; struct Node *next; };
+        int main() {
+            struct Node a;
+            struct Node b;
+            a.pos.x = 1.0f;
+            a.pos.y = 2.0f;
+            b.pos.x = 3.0f;
+            b.pos.y = 4.0f;
+            a.next = &b;
+            b.next = 0;
+            return (int)(a.next->pos.x + a.next->pos.y);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+
+    it("malloc + typedef struct pointer + arrow access", async () => {
+      const source = `
+        typedef struct { int x, y; } Point;
+        int main() {
+            Point *p = (Point *)malloc(sizeof(Point));
+            p->x = 100;
+            p->y = 200;
+            return p->x + p->y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(300);
+    });
+
+    it("full target: sorted linked list (returns 13)", async () => {
+      const source = `
+        typedef struct { float x, y; } Vec2;
+        typedef struct Node { Vec2 pos; struct Node *next; } Node;
+
+        static Node *insert_sorted(Node *head, Vec2 v) {
+            Node *n = (Node *)malloc(sizeof(Node));
+            n->pos = v;
+            n->next = 0;
+            if (head == 0 || v.x < head->pos.x) {
+                n->next = head;
+                return n;
+            }
+            Node *cur = head;
+            while (cur->next != 0 && cur->next->pos.x < v.x) {
+                cur = cur->next;
+            }
+            n->next = cur->next;
+            cur->next = n;
+            return head;
+        }
+
+        int main() {
+            Node *list = 0;
+            float coords[] = {3.0f, 0.0f, 1.0f, 0.0f, 4.0f, 0.0f, 5.0f, 0.0f};
+            for (int i = 0; i < 8; i = i + 2) {
+                Vec2 v;
+                v.x = coords[i];
+                v.y = coords[i + 1];
+                list = insert_sorted(list, v);
+            }
+            float sum = 0.0f;
+            Node *cur = list;
+            while (cur != 0) {
+                sum = sum + cur->pos.x;
+                cur = cur->next;
+            }
+            return (int)sum;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(13);
+    });
+  });
 });

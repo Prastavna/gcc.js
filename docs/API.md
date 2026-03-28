@@ -151,7 +151,7 @@ const wasmBytes = generate(ast);
 
 ---
 
-## Supported C Subset (through Milestone 25)
+## Supported C Subset (through Milestone 26)
 
 ### Types
 - `int` (32-bit signed), `char` (8-bit signed), `short` (16-bit signed), `long` (64-bit signed), `void`
@@ -159,7 +159,7 @@ const wasmBytes = generate(ast);
 - `signed` keyword (explicit: `signed char`, `signed int`, `signed short`, `signed long`)
 - `float` (32-bit IEEE 754), `double` (64-bit IEEE 754)
 - `enum` declarations with auto-increment and explicit values
-- `typedef` type aliases
+- `typedef` type aliases, including `typedef struct { ... } Name;` (anonymous) and `typedef struct Name { ... } Name;` (named)
 - `union` (overlapping memory layout)
 - `void *` generic pointer type (implicit cast to/from any pointer)
 - Type casting: `(int)expr`, `(char)expr`, `(short)expr`, `(long)expr`, `(float)expr`, `(double)expr`, `(unsigned int)expr`, `(unsigned short)expr`, `(signed int)expr`
@@ -202,7 +202,10 @@ const wasmBytes = generate(ast);
 - Struct initializer lists: `struct Point p = {1, 2};`
 - Struct copy by value: `struct Point p2 = p1;`
 - Struct assignment: `p2 = p1;` (deep copy)
+- Multi-declarator struct fields: `float x, y;` inside struct body
 - Chained member access: `line.start.x`, `line.start.y = 5`
+- Chained arrow access: `cur->next->pos.x`, `n->pos = v` (struct copy through pointer)
+- Struct field assignment through member/arrow: `n.pos = v;`, `p->pos = v;` (deep copy)
 
 ### Expressions
 - Arithmetic: `+`, `-`, `*`, `/`, `%`

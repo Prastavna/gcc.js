@@ -195,6 +195,10 @@ const examples: { label: string; code: string }[] = [
     label: 'Void ptr memcpy',
     code: `void *memcpy(void *dest, void *src, int n) {\n    char *d = (char *)dest;\n    char *s = (char *)src;\n    for (int i = 0; i < n; i = i + 1) {\n        d[i] = s[i];\n    }\n    return dest;\n}\n\nint main() {\n    int a = 42, b = 0;\n    memcpy(&b, &a, sizeof(int));\n    return b;\n}`,
   },
+  {
+    label: 'Sorted linked list',
+    code: `typedef struct { float x, y; } Vec2;\ntypedef struct Node { Vec2 pos; struct Node *next; } Node;\n\nstatic Node *insert_sorted(Node *head, Vec2 v) {\n    Node *n = (Node *)malloc(sizeof(Node));\n    n->pos = v;\n    n->next = 0;\n    if (head == 0 || v.x < head->pos.x) {\n        n->next = head;\n        return n;\n    }\n    Node *cur = head;\n    while (cur->next != 0 && cur->next->pos.x < v.x) {\n        cur = cur->next;\n    }\n    n->next = cur->next;\n    cur->next = n;\n    return head;\n}\n\nint main() {\n    Node *list = 0;\n    float coords[] = {3.0f, 0.0f, 1.0f, 0.0f, 4.0f, 0.0f, 5.0f, 0.0f};\n    for (int i = 0; i < 8; i = i + 2) {\n        Vec2 v;\n        v.x = coords[i];\n        v.y = coords[i + 1];\n        list = insert_sorted(list, v);\n    }\n    float sum = 0.0f;\n    Node *cur = list;\n    while (cur != 0) {\n        sum = sum + cur->pos.x;\n        cur = cur->next;\n    }\n    return (int)sum;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

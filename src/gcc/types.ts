@@ -302,7 +302,7 @@ export interface MemberAssignmentExpression {
 /** p->x — reads a struct field through a pointer */
 export interface ArrowAccessExpression {
   type: "ArrowAccessExpression";
-  pointer: string;
+  pointer: string | Expression;
   member: string;
 }
 

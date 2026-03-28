@@ -90,7 +90,7 @@ function emitConversion(out: number[], from: CType, to: CType): void {
 
 // ── Struct layout types ──────────────────────────────────
 
-type StructFieldInfo = { name: string; ctype: CType; offset: number; structName?: string; fieldSize?: number };
+type StructFieldInfo = { name: string; ctype: CType; offset: number; structName?: string; fieldSize?: number; ptrStructName?: string };
 type StructDef = { name: string; fields: StructFieldInfo[]; size: number };
 
 function typeSpecToCType(ts: TypeSpecifier): CType {
@@ -121,7 +121,9 @@ function computeStructLayout(decl: StructDeclaration): StructDef {
       const ctype = typeSpecToCType(f.typeSpec);
       const size = sizeOfType(ctype);
       while (offset % size !== 0) offset++;
-      fields.push({ name: f.name, ctype, offset });
+      // Track pointer-to-struct target name for arrow access resolution
+      const ptrStructName = f.pointer && typeof f.typeSpec === "object" && "kind" in f.typeSpec && f.typeSpec.kind === "struct" ? f.typeSpec.name : undefined;
+      fields.push({ name: f.name, ctype, offset, ptrStructName });
       offset += size;
     }
   }
@@ -1799,18 +1801,24 @@ function resolveExprStructName(expr: Expression, ctx: Ctx): string {
       if (parentDef) {
         const field = parentDef.fields.find(f => f.name === expr.member);
         if (field?.structName) return field.structName;
+        if (field?.ptrStructName) return field.ptrStructName;
       }
     }
   }
   if (expr.type === "ArrowAccessExpression") {
-    const ptrStructName = typeof expr.pointer === "string"
-      ? ctx.varStructPtrTypes.get(expr.pointer)
-      : null;
-    if (ptrStructName) {
-      const parentDef = structDefs.get(ptrStructName);
+    let parentStructName: string | undefined | null;
+    if (typeof expr.pointer === "string") {
+      parentStructName = ctx.varStructPtrTypes.get(expr.pointer);
+    } else {
+      // Recursive: resolve struct type from expression (e.g., cur->next->pos)
+      try { parentStructName = resolveExprStructName(expr.pointer, ctx); } catch { parentStructName = null; }
+    }
+    if (parentStructName) {
+      const parentDef = structDefs.get(parentStructName);
       if (parentDef) {
         const field = parentDef.fields.find(f => f.name === expr.member);
         if (field?.structName) return field.structName;
+        if (field?.ptrStructName) return field.ptrStructName;
       }
     }
   }
@@ -1846,13 +1854,15 @@ function resolveStructField(objectName: string, memberName: string, ctx: Ctx): {
   return { addr, fieldInfo };
 }
 
-function resolveArrowField(pointerName: string, memberName: string, ctx: Ctx): StructFieldInfo {
-  // Need to figure out which struct this pointer points to
-  // Check pointer variable type annotations - for now we need a way to track this
-  // The pointer variable was declared as `struct Name *p`, so its typeSpec is a StructTypeSpecifier
-  // We stored struct pointer info in varStructPtrTypes
-  const structName = ctx.varStructPtrTypes?.get(pointerName);
-  if (!structName) throw new Error(`Cannot determine struct type for pointer '${pointerName}'`);
+function resolveArrowField(pointer: string | Expression, memberName: string, ctx: Ctx): StructFieldInfo {
+  let structName: string | undefined;
+  if (typeof pointer === "string") {
+    structName = ctx.varStructPtrTypes?.get(pointer);
+  } else {
+    // Expression-based pointer (e.g., cur->next->pos) — resolve struct type from expression
+    structName = resolveExprStructName(pointer, ctx);
+  }
+  if (!structName) throw new Error(`Cannot determine struct type for pointer '${typeof pointer === "string" ? pointer : "expression"}'`);
   const def = structDefs.get(structName);
   if (!def) throw new Error(`Unknown struct type '${structName}'`);
   const fieldInfo = def.fields.find(f => f.name === memberName);
@@ -2573,6 +2583,46 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
         return "void";
       }
       const { addr, fieldInfo } = resolveStructField(expr.object, expr.member, ctx);
+      // Struct field assignment: n.pos = p (copy struct fields)
+      if (fieldInfo.structName) {
+        const nestedDef = structDefs.get(fieldInfo.structName);
+        if (!nestedDef) throw new Error(`Unknown struct type '${fieldInfo.structName}'`);
+        const valExpr = expr.value;
+        let srcAddr: number | null = null;
+        let srcLocalIdx: number | null = null;
+        if (valExpr.type === "Identifier") {
+          const sv = ctx.structVars.get(valExpr.name);
+          if (sv) srcAddr = sv.addr;
+          const sp2 = ctx.structParamVars.get(valExpr.name);
+          if (sp2) srcLocalIdx = sp2.localIdx;
+        }
+        const destBase = addr !== null ? addr + fieldInfo.offset : -1;
+        for (const f of nestedDef.fields) {
+          // Dest address
+          if (addr !== null) {
+            out.push(Op.I32_CONST, ...encodeSignedLEB128(destBase + f.offset));
+          } else {
+            const sp = ctx.structParamVars.get(expr.object)!;
+            out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(sp.localIdx));
+            out.push(Op.I32_CONST, ...encodeSignedLEB128(fieldInfo.offset + f.offset));
+            out.push(Op.I32_ADD);
+          }
+          // Src value
+          if (srcAddr !== null) {
+            out.push(Op.I32_CONST, ...encodeSignedLEB128(srcAddr + f.offset));
+            emitMemLoad(out, f.ctype);
+          } else if (srcLocalIdx !== null) {
+            out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(srcLocalIdx));
+            if (f.offset > 0) {
+              out.push(Op.I32_CONST, ...encodeSignedLEB128(f.offset));
+              out.push(Op.I32_ADD);
+            }
+            emitMemLoad(out, f.ctype);
+          }
+          emitMemStore(out, f.ctype);
+        }
+        return "void";
+      }
       if (addr !== null) {
         out.push(Op.I32_CONST, ...encodeSignedLEB128(addr + fieldInfo.offset));
       } else {
@@ -2590,17 +2640,69 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
     }
     case "ArrowAccessExpression": {
       const fieldInfo = resolveArrowField(expr.pointer, expr.member, ctx);
-      emitVarGet(out, expr.pointer, ctx);
+      if (typeof expr.pointer === "string") {
+        emitVarGet(out, expr.pointer, ctx);
+      } else {
+        emitExpression(out, expr.pointer, ctx);
+      }
       if (fieldInfo.offset > 0) {
         out.push(Op.I32_CONST, ...encodeSignedLEB128(fieldInfo.offset));
         out.push(Op.I32_ADD);
       }
+      // Nested struct field: return address, don't load
+      if (fieldInfo.structName) return "int";
       emitMemLoad(out, fieldInfo.ctype);
       return fieldInfo.ctype;
     }
     case "ArrowAssignmentExpression": {
       const fieldInfo = resolveArrowField(expr.pointer, expr.member, ctx);
-      emitVarGet(out, expr.pointer, ctx);
+      if (fieldInfo.structName) {
+        // Struct field assignment: n->pos = v (copy struct fields)
+        const def = structDefs.get(fieldInfo.structName);
+        if (!def) throw new Error(`Unknown struct type '${fieldInfo.structName}'`);
+        // Determine source address
+        const valExpr = expr.value;
+        let srcAddr: number | null = null;
+        let srcLocalIdx: number | null = null;
+        if (valExpr.type === "Identifier") {
+          const sv = ctx.structVars.get(valExpr.name);
+          if (sv) srcAddr = sv.addr;
+          const sp = ctx.structParamVars.get(valExpr.name);
+          if (sp) srcLocalIdx = sp.localIdx;
+        }
+        // Copy field by field: dest = pointer + fieldInfo.offset, src = struct var address
+        for (const f of def.fields) {
+          // Dest address
+          if (typeof expr.pointer === "string") {
+            emitVarGet(out, expr.pointer, ctx);
+          } else {
+            emitExpression(out, expr.pointer, ctx);
+          }
+          if (fieldInfo.offset + f.offset > 0) {
+            out.push(Op.I32_CONST, ...encodeSignedLEB128(fieldInfo.offset + f.offset));
+            out.push(Op.I32_ADD);
+          }
+          // Src value
+          if (srcAddr !== null) {
+            out.push(Op.I32_CONST, ...encodeSignedLEB128(srcAddr + f.offset));
+            emitMemLoad(out, f.ctype);
+          } else if (srcLocalIdx !== null) {
+            out.push(Op.LOCAL_GET, ...encodeUnsignedLEB128(srcLocalIdx));
+            if (f.offset > 0) {
+              out.push(Op.I32_CONST, ...encodeSignedLEB128(f.offset));
+              out.push(Op.I32_ADD);
+            }
+            emitMemLoad(out, f.ctype);
+          }
+          emitMemStore(out, f.ctype);
+        }
+        return "void";
+      }
+      if (typeof expr.pointer === "string") {
+        emitVarGet(out, expr.pointer, ctx);
+      } else {
+        emitExpression(out, expr.pointer, ctx);
+      }
       if (fieldInfo.offset > 0) {
         out.push(Op.I32_CONST, ...encodeSignedLEB128(fieldInfo.offset));
         out.push(Op.I32_ADD);

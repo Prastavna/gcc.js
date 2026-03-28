@@ -573,27 +573,37 @@ export function parse(tokens: Token[]): Program {
         }
         return result;
       }
-      // Member access: ident.member with chaining for ident.member.member...
+      // Member access: ident.member with chaining for ident.member.member... or ident.member->member...
       if (current().type === TokenType.DOT) {
         pos++; // skip .
         const member = expect(TokenType.IDENTIFIER, "member name after '.'").value;
         let result: Expression = { type: "MemberAccessExpression", object: name, member };
-        while (current().type === TokenType.DOT) {
-          pos++; // skip .
-          const nextMember = expect(TokenType.IDENTIFIER, "member name after '.'").value;
-          result = { type: "MemberAccessExpression", object: result, member: nextMember };
+        while (current().type === TokenType.DOT || current().type === TokenType.ARROW) {
+          const nextIsArrow = current().type === TokenType.ARROW;
+          pos++; // skip . or ->
+          const nextMember = expect(TokenType.IDENTIFIER, "member name").value;
+          if (nextIsArrow) {
+            result = { type: "ArrowAccessExpression", pointer: result, member: nextMember };
+          } else {
+            result = { type: "MemberAccessExpression", object: result, member: nextMember };
+          }
         }
         return result;
       }
-      // Arrow access: ident->member with chaining for ident->member.member...
+      // Arrow access: ident->member with chaining for ident->member.member... or ident->member->member...
       if (current().type === TokenType.ARROW) {
         pos++; // skip ->
         const member = expect(TokenType.IDENTIFIER, "member name after '->'").value;
         let result: Expression = { type: "ArrowAccessExpression", pointer: name, member };
-        while (current().type === TokenType.DOT) {
-          pos++; // skip .
-          const nextMember = expect(TokenType.IDENTIFIER, "member name after '.'").value;
-          result = { type: "MemberAccessExpression", object: result, member: nextMember };
+        while (current().type === TokenType.DOT || current().type === TokenType.ARROW) {
+          const nextIsArrow = current().type === TokenType.ARROW;
+          pos++; // skip . or ->
+          const nextMember = expect(TokenType.IDENTIFIER, "member name").value;
+          if (nextIsArrow) {
+            result = { type: "ArrowAccessExpression", pointer: result, member: nextMember };
+          } else {
+            result = { type: "MemberAccessExpression", object: result, member: nextMember };
+          }
         }
         return result;
       }
@@ -966,6 +976,10 @@ export function parse(tokens: Token[]): Program {
         pendingStatements.push({ type: "VariableDeclaration", name: extraName, typeSpec, initializer: extraInit, pointer: ptr || undefined });
       }
       expect(TokenType.SEMICOLON, "';' after variable declaration");
+      // Typedef struct variable: Vec2 v = other; → StructVariableDeclaration
+      if (typeof typeSpec === "object" && "kind" in typeSpec && typeSpec.kind === "struct") {
+        return { type: "StructVariableDeclaration", name, structName: typeSpec.name, initializer };
+      }
       return { type: "VariableDeclaration", name, typeSpec, initializer };
     }
 
@@ -982,6 +996,10 @@ export function parse(tokens: Token[]): Program {
         funcPtrVars.add(name);
       }
       expect(TokenType.SEMICOLON, "';' after variable declaration");
+      // Typedef struct variable: Vec2 v; → StructVariableDeclaration
+      if (typeof typeSpec === "object" && "kind" in typeSpec && typeSpec.kind === "struct") {
+        return { type: "StructVariableDeclaration", name, structName: typeSpec.name, initializer: undefined };
+      }
       // Synthesize a zero initializer
       const initializer: Expression = (typeSpec === "float")
         ? { type: "FloatingLiteral", value: 0, isFloat: true }
@@ -1254,8 +1272,16 @@ export function parse(tokens: Token[]): Program {
       let pointer = false;
       if (current().type === TokenType.STAR) { pos++; pointer = true; }
       const fieldName = expect(TokenType.IDENTIFIER, "field name").value;
-      expect(TokenType.SEMICOLON, "';' after field declaration");
       fields.push({ name: fieldName, typeSpec: fieldType, pointer: pointer || undefined });
+      // Multi-declarator fields: float x, y;
+      while (current().type === TokenType.COMMA) {
+        pos++; // skip comma
+        let ptr2 = false;
+        if (current().type === TokenType.STAR) { ptr2 = true; pos++; }
+        const extraName = expect(TokenType.IDENTIFIER, "field name").value;
+        fields.push({ name: extraName, typeSpec: fieldType, pointer: ptr2 || undefined });
+      }
+      expect(TokenType.SEMICOLON, "';' after field declaration");
     }
     return fields;
   }
@@ -1310,9 +1336,36 @@ export function parse(tokens: Token[]): Program {
     return { type: "EnumDeclaration", name, members };
   }
 
-  /** Parse a typedef: typedef type alias; or typedef type (*alias)(params); */
+  /** Parse a typedef: typedef type alias; or typedef type (*alias)(params); or typedef struct { ... } alias; */
+  let anonStructCounter = 0;
   function parseTypedef(): Declaration | null {
     pos++; // skip 'typedef'
+
+    // typedef struct { ... } Alias; (anonymous) or typedef struct Name { ... } Alias; (named with body)
+    if (current().type === TokenType.STRUCT) {
+      const hasName = peek(1).type === TokenType.IDENTIFIER;
+      const hasBody = hasName ? peek(2).type === TokenType.LBRACE : peek(1).type === TokenType.LBRACE;
+      if (hasBody) {
+        pos++; // skip 'struct'
+        let structName: string;
+        if (hasName) {
+          structName = expect(TokenType.IDENTIFIER, "struct name").value;
+        } else {
+          structName = `__anon_struct_${anonStructCounter++}`;
+        }
+        expect(TokenType.LBRACE, "'{' after struct in typedef");
+        const fields = parseFields();
+        expect(TokenType.RBRACE, "'}' after struct fields");
+        nestedStructDecls.push({ type: "StructDeclaration", name: structName, fields });
+        // Optional pointer: typedef struct { ... } *Alias;
+        if (current().type === TokenType.STAR) pos++;
+        const aliasName = expect(TokenType.IDENTIFIER, "typedef alias name").value;
+        expect(TokenType.SEMICOLON, "';' after typedef");
+        typedefs.set(aliasName, { kind: "struct", name: structName });
+        return null;
+      }
+    }
+
     const baseType = parseTypeSpec();
 
     // Function pointer typedef: typedef int (*Name)(int, int);

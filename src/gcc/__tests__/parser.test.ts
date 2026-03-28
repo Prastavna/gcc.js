@@ -1051,4 +1051,62 @@ describe("parser", () => {
       expect(func.returnType).toBe("void");
     });
   });
+
+  describe("Milestone 26: C89 graduation test", () => {
+    it("anonymous struct typedef", () => {
+      const ast = parseSource("typedef struct { int x; int y; } Point; int main() { return 0; }");
+      // The struct def should be registered and typedef should work
+      expect(ast.declarations.length).toBeGreaterThanOrEqual(1);
+      // StructDeclaration for the anonymous struct should be in declarations
+      const structDecl = ast.declarations.find((d: any) => d.type === "StructDeclaration") as any;
+      expect(structDecl).toBeDefined();
+      expect(structDecl.fields.length).toBe(2);
+    });
+
+    it("named struct typedef with body", () => {
+      const ast = parseSource("typedef struct Node { int val; } Node; int main() { return 0; }");
+      const structDecl = ast.declarations.find((d: any) => d.type === "StructDeclaration") as any;
+      expect(structDecl).toBeDefined();
+      expect(structDecl.name).toBe("Node");
+      expect(structDecl.fields.length).toBe(1);
+    });
+
+    it("multi-declarator struct fields", () => {
+      const ast = parseSource("struct Vec2 { float x, y; }; int main() { return 0; }");
+      const structDecl = ast.declarations.find((d: any) => d.type === "StructDeclaration") as any;
+      expect(structDecl).toBeDefined();
+      expect(structDecl.fields.length).toBe(2);
+      expect(structDecl.fields[0].name).toBe("x");
+      expect(structDecl.fields[1].name).toBe("y");
+      expect(structDecl.fields[0].typeSpec).toBe("float");
+      expect(structDecl.fields[1].typeSpec).toBe("float");
+    });
+
+    it("chained arrow access a->b->c.d", () => {
+      const ast = parseSource(`
+        struct Inner { int val; };
+        struct Mid { struct Inner *inner; };
+        struct Outer { struct Mid *mid; };
+        int main() {
+          struct Outer *o;
+          return o->mid->inner->val;
+        }
+      `);
+      const func = ast.declarations.find((d: any) => d.type === "FunctionDeclaration") as any;
+      const ret = func.body.find((s: any) => s.type === "ReturnStatement") as any;
+      // o->mid->inner->val should be nested ArrowAccessExpressions
+      expect(ret.expression.type).toBe("ArrowAccessExpression");
+      expect(ret.expression.member).toBe("val");
+      expect(ret.expression.pointer.type).toBe("ArrowAccessExpression");
+      expect(ret.expression.pointer.member).toBe("inner");
+    });
+
+    it("typedef struct variable becomes StructVariableDeclaration", () => {
+      const ast = parseSource("typedef struct { int x; } Point; int main() { Point p; return 0; }");
+      const func = ast.declarations.find((d: any) => d.type === "FunctionDeclaration") as any;
+      const varDecl = func.body.find((s: any) => s.type === "StructVariableDeclaration") as any;
+      expect(varDecl).toBeDefined();
+      expect(varDecl.name).toBe("p");
+    });
+  });
 });

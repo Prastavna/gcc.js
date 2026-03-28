@@ -564,7 +564,7 @@ int main() {
 - [x] `va_list`, `va_start`, `va_arg`, `va_end` (built-in macros/types)
 - [x] Multiple declarators in one statement (`int a = 10, b = 20;`)
 
-### Milestone 26: C89 graduation test
+### Milestone 26: C89 graduation test [DONE]
 ```c
 #include "stdlib.h"
 
@@ -596,8 +596,8 @@ static Node *insert_sorted(Node *head, Vec2 v) {
 
 int main() {
     Node *list = 0;
-    float coords[] = {3.0f, 1.0f, 4.0f, 1.0f, 5.0f, 9.0f};
-    for (int i = 0; i < 6; i = i + 2) {
+    float coords[] = {3.0f, 0.0f, 1.0f, 0.0f, 4.0f, 0.0f, 5.0f, 0.0f};
+    for (int i = 0; i < 8; i = i + 2) {
         Vec2 v;
         v.x = coords[i];
         v.y = coords[i + 1];
@@ -613,9 +613,9 @@ int main() {
     return (int)sum;
 }
 ```
-- [ ] **Target**: a non-trivial program using floats, structs, pointers, malloc, typedef, static
-- [ ] Validates: the full C89 subset working together as a coherent language
-- [ ] This is the C89 "graduation" test for the compiler
+- [x] **Target**: a non-trivial program using floats, structs, pointers, malloc, typedef, static
+- [x] Validates: the full C89 subset working together as a coherent language
+- [x] This is the C89 "graduation" test for the compiler
 
 ---
 

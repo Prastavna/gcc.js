@@ -309,7 +309,7 @@ export interface ArrowAccessExpression {
 /** p->x = val — writes a struct field through a pointer */
 export interface ArrowAssignmentExpression {
   type: "ArrowAssignmentExpression";
-  pointer: string;
+  pointer: string | Expression;
   member: string;
   value: Expression;
 }

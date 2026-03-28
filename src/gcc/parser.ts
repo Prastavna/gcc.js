@@ -886,7 +886,6 @@ export function parse(tokens: Token[]): Program {
         dimensions.push(parseInt(sizeTok.value, 10));
         expect(TokenType.RBRACKET, "']'");
       }
-      const totalSize = dimensions.reduce((a, b) => a * b, 1);
       let initializer: (Expression | Expression[])[] | undefined;
       let stringInit: string | undefined;
       if (current().type === TokenType.EQUALS) {

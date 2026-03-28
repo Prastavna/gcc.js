@@ -53,9 +53,6 @@ function sizeOfType(ctype: CType): number {
   }
 }
 
-function isFP(ctype: CType): boolean {
-  return ctype === "float" || ctype === "double";
-}
 
 /** Promote: char < int < long < float < double. Unsigned wins if both int types. */
 function promoteTypes(a: CType, b: CType): CType {
@@ -405,7 +402,7 @@ function collectStringsFromStatement(stmt: Statement, cb: (s: string) => void): 
     case "ReturnStatement": collectStringsFromExpr(stmt.expression, cb); break;
     case "VariableDeclaration": collectStringsFromExpr(stmt.initializer, cb); break;
     case "ArrayDeclaration":
-      if (stmt.initializer) stmt.initializer.forEach(e => collectStringsFromExpr(e, cb));
+      if (stmt.initializer) stmt.initializer.forEach(e => { if (!Array.isArray(e)) collectStringsFromExpr(e, cb); });
       break;
     case "StructVariableDeclaration": break;
     case "ExpressionStatement": collectStringsFromExpr(stmt.expression, cb); break;
@@ -770,7 +767,7 @@ function findATInStatement(stmt: Statement, taken: Set<string>): void {
     case "ReturnStatement": findATInExpr(stmt.expression, taken); break;
     case "VariableDeclaration": findATInExpr(stmt.initializer, taken); break;
     case "ArrayDeclaration":
-      if (stmt.initializer) stmt.initializer.forEach(e => findATInExpr(e, taken));
+      if (stmt.initializer) stmt.initializer.forEach(e => { if (!Array.isArray(e)) findATInExpr(e, taken); });
       break;
     case "StructVariableDeclaration": break;
     case "ExpressionStatement": findATInExpr(stmt.expression, taken); break;
@@ -1982,7 +1979,6 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       const leftType = inferType(expr.left, ctx);
       const rightType = inferType(expr.right, ctx);
       const isComparison = ["==", "!=", "<", ">", "<=", ">="].includes(expr.operator);
-      const isBitwise = ["&", "|", "^", "<<", ">>"].includes(expr.operator);
       const opType = promoteTypes(leftType, rightType);
 
       const lt = emitExpression(out, expr.left, ctx);
@@ -2213,7 +2209,6 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
         // Push the function pointer (table index) onto stack
         emitVarGet(out, expr.callee, ctx);
         // Determine type index from the variable's function pointer type
-        const varType = ctx.localTypes.get(expr.callee);
         // For function pointer params/vars, find the type index by matching signature
         // Look up from funcPtrTypeIndices via any function with matching signature,
         // or compute it from the FunctionPointerTypeSpecifier stored as variable info
@@ -2401,14 +2396,15 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
         elemType = "int";
         elemSize = sizeOfType(elemType);
         // Check if inner expression is an array access on a multi-dim array to get proper element type
-        if (expr.array.type === "ArrayAccessExpression" && typeof expr.array.array === "string") {
-          const innerArrInfo = ctx.arrayVars.get(expr.array.array);
+        const innerArr = expr.array as Expression;
+        if (innerArr.type === "ArrayAccessExpression" && typeof innerArr.array === "string") {
+          const innerArrInfo = ctx.arrayVars.get(innerArr.array);
           if (innerArrInfo) {
             elemType = innerArrInfo.elemType;
             elemSize = innerArrInfo.elemSize;
           }
         }
-        emitExpression(out, expr.array, ctx);
+        emitExpression(out, innerArr, ctx);
       }
       emitExpression(out, expr.index, ctx);
       out.push(Op.I32_CONST, ...encodeSignedLEB128(elemSize));
@@ -2436,14 +2432,15 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
         // Chained: e.g. matrix[i][j] = val — inner expression is an address
         elemType = "int";
         elemSize = sizeOfType(elemType);
-        if (expr.array.type === "ArrayAccessExpression" && typeof expr.array.array === "string") {
-          const innerArrInfo = ctx.arrayVars.get(expr.array.array);
+        const innerArr = expr.array as Expression;
+        if (innerArr.type === "ArrayAccessExpression" && typeof innerArr.array === "string") {
+          const innerArrInfo = ctx.arrayVars.get(innerArr.array);
           if (innerArrInfo) {
             elemType = innerArrInfo.elemType;
             elemSize = innerArrInfo.elemSize;
           }
         }
-        emitExpression(out, expr.array, ctx);
+        emitExpression(out, innerArr, ctx);
       }
       emitExpression(out, expr.index, ctx);
       out.push(Op.I32_CONST, ...encodeSignedLEB128(elemSize));

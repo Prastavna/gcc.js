@@ -27,10 +27,13 @@ export function parse(tokens: Token[]): Program {
   // Maps for compile-time constant resolution
   const enumConstants = new Map<string, number>();
   const typedefs = new Map<string, TypeSpecifier>();
+  typedefs.set("va_list", "int"); // built-in: va_list is an int (pointer to varargs area)
   // Track function pointer variables for indirect call detection
   const funcPtrVars = new Set<string>();
   // Nested struct definitions discovered during field parsing
   const nestedStructDecls: Declaration[] = [];
+  // Pending statements from multi-declarator parsing (int a = 10, b = 20;)
+  const pendingStatements: Statement[] = [];
 
   function current(): Token {
     return tokens[pos];
@@ -530,6 +533,17 @@ export function parse(tokens: Token[]): Program {
         return { type: "IntegerLiteral", value: enumConstants.get(tok.value)! };
       }
 
+      // va_arg(ap, type) — second arg is a type, not an expression
+      if (tok.value === "va_arg" && peek(1).type === TokenType.LPAREN) {
+        pos++; // skip va_arg
+        pos++; // skip (
+        const vaList = expect(TokenType.IDENTIFIER, "va_list variable name").value;
+        expect(TokenType.COMMA, "','");
+        const argType = parseTypeSpec();
+        expect(TokenType.RPAREN, "')' after va_arg");
+        return { type: "VaArgExpression", vaList, argType };
+      }
+
       const name = tok.value;
       pos++;
       // Array access: ident[expr] with chaining for ident[expr][expr] and ident[expr].member
@@ -608,9 +622,12 @@ export function parse(tokens: Token[]): Program {
         if (isCast) {
           pos++; // skip (
           const targetType = parseTypeSpec();
+          // Check for pointer cast: (char *)expr, (void *)expr
+          let pointer = false;
+          if (current().type === TokenType.STAR) { pointer = true; pos++; }
           expect(TokenType.RPAREN, "')' after cast type");
           const operand = parseUnary();
-          return { type: "CastExpression", targetType, operand };
+          return { type: "CastExpression", targetType, operand, pointer: pointer || undefined };
         }
       }
       pos++;
@@ -637,8 +654,12 @@ export function parse(tokens: Token[]): Program {
     // We're at pos pointing to LPAREN, peek(1) is the type spec start
     const t = peek(1).type;
     if (t === TokenType.STRUCT || t === TokenType.UNION) {
-      // (struct Name) or (union Name) — 4 tokens
-      return peek(2).type === TokenType.IDENTIFIER && peek(3).type === TokenType.RPAREN;
+      // (struct Name) or (union Name) — 4 tokens, or (struct Name *) — 5 tokens
+      if (peek(2).type === TokenType.IDENTIFIER) {
+        if (peek(3).type === TokenType.RPAREN) return true;
+        if (peek(3).type === TokenType.STAR && peek(4).type === TokenType.RPAREN) return true;
+      }
+      return false;
     }
     if (t === TokenType.UNSIGNED || t === TokenType.SIGNED) {
       // (unsigned), (unsigned int), (unsigned char), (unsigned short)
@@ -647,8 +668,12 @@ export function parse(tokens: Token[]): Program {
       if ((peek(2).type === TokenType.INT || peek(2).type === TokenType.CHAR || peek(2).type === TokenType.SHORT || peek(2).type === TokenType.LONG) && peek(3).type === TokenType.RPAREN) return true;
       return false;
     }
-    // Simple type: (int), (char), (short), (long), (float), (double), (void), or (typedef_name)
-    return isTypeSpecAtPos(pos + 1) && peek(2).type === TokenType.RPAREN;
+    // Simple type: (int), (char), (void), etc. or (type *) for pointer casts
+    if (isTypeSpecAtPos(pos + 1)) {
+      if (peek(2).type === TokenType.RPAREN) return true;
+      if (peek(2).type === TokenType.STAR && peek(3).type === TokenType.RPAREN) return true;
+    }
+    return false;
   }
 
   // ── Statement parsing ─────────────────────────────────
@@ -668,6 +693,11 @@ export function parse(tokens: Token[]): Program {
   }
 
   function parseStatement(): Statement {
+    // Drain pending statements from multi-declarator parsing
+    if (pendingStatements.length > 0) {
+      return pendingStatements.shift()!;
+    }
+
     // Consume qualifiers/storage classes before declarations
     if (isQualifierOrStorage(current().type)) {
       consumeQualifiers(); // qualifiers consumed and discarded at local scope
@@ -797,18 +827,23 @@ export function parse(tokens: Token[]): Program {
       return { type: "VariableDeclaration", name, typeSpec: fpType, initializer };
     }
 
-    // Pointer variable declaration: int *p = expr;
+    // Pointer variable declaration: int *p = expr; or int *p;
     if (
       isTypeSpec() &&
       peek(typeSpecLength()).type === TokenType.STAR &&
       peek(typeSpecLength() + 1).type === TokenType.IDENTIFIER &&
-      peek(typeSpecLength() + 2).type === TokenType.EQUALS
+      (peek(typeSpecLength() + 2).type === TokenType.EQUALS || peek(typeSpecLength() + 2).type === TokenType.SEMICOLON)
     ) {
       const typeSpec = parseTypeSpec();
       pos++; // skip '*'
       const name = expect(TokenType.IDENTIFIER, "variable name").value;
-      expect(TokenType.EQUALS, "'=' in variable declaration");
-      const initializer = parseExpression();
+      let initializer: Expression;
+      if (current().type === TokenType.EQUALS) {
+        pos++;
+        initializer = parseExpression();
+      } else {
+        initializer = { type: "IntegerLiteral", value: 0 };
+      }
       expect(TokenType.SEMICOLON, "';' after variable declaration");
       return { type: "VariableDeclaration", name, typeSpec, initializer, pointer: true };
     }
@@ -893,11 +928,11 @@ export function parse(tokens: Token[]): Program {
       return { type: "ArrayDeclaration", name, typeSpec, size, dimensions, initializer, stringInit };
     }
 
-    // Variable declaration: int x = expr;
+    // Variable declaration: int x = expr; or int a = 10, b = 20;
     if (
       isTypeSpec() &&
       peek(typeSpecLength()).type === TokenType.IDENTIFIER &&
-      peek(typeSpecLength() + 1).type === TokenType.EQUALS
+      (peek(typeSpecLength() + 1).type === TokenType.EQUALS || peek(typeSpecLength() + 1).type === TokenType.COMMA)
     ) {
       const typeSpec = parseTypeSpec();
       // Consume any post-type qualifiers like `int const x = ...`
@@ -907,8 +942,29 @@ export function parse(tokens: Token[]): Program {
       if (typeof typeSpec === "object" && "kind" in typeSpec && typeSpec.kind === "functionPointer") {
         funcPtrVars.add(name);
       }
-      expect(TokenType.EQUALS, "'=' in variable declaration");
-      const initializer = parseExpression();
+      let initializer: Expression;
+      if (current().type === TokenType.EQUALS) {
+        pos++;
+        initializer = parseAssignment();
+      } else {
+        // Uninitialized in multi-decl: int a, b = 20;
+        initializer = { type: "IntegerLiteral", value: 0 };
+      }
+      // Handle comma-separated additional declarators: int a = 10, b = 20;
+      while (current().type === TokenType.COMMA) {
+        pos++; // skip comma
+        let ptr = false;
+        if (current().type === TokenType.STAR) { ptr = true; pos++; }
+        const extraName = expect(TokenType.IDENTIFIER, "variable name").value;
+        let extraInit: Expression;
+        if (current().type === TokenType.EQUALS) {
+          pos++;
+          extraInit = parseAssignment();
+        } else {
+          extraInit = { type: "IntegerLiteral", value: 0 };
+        }
+        pendingStatements.push({ type: "VariableDeclaration", name: extraName, typeSpec, initializer: extraInit, pointer: ptr || undefined });
+      }
       expect(TokenType.SEMICOLON, "';' after variable declaration");
       return { type: "VariableDeclaration", name, typeSpec, initializer };
     }
@@ -1150,12 +1206,27 @@ export function parse(tokens: Token[]): Program {
     return { type: "Parameter", name, typeSpec, pointer };
   }
 
+  let lastParseVariadic = false; // set by parseParamList for the caller to read
+
   function parseParamList(): Parameter[] {
+    lastParseVariadic = false;
     const params: Parameter[] = [];
     if (current().type === TokenType.RPAREN) return params;
+    // Handle lone ... (e.g., printf-style: int printf(...))
+    if (current().type === TokenType.ELLIPSIS) {
+      pos++;
+      lastParseVariadic = true;
+      return params;
+    }
     params.push(parseOneParam());
     while (current().type === TokenType.COMMA) {
       pos++;
+      // Check for ... after comma
+      if (current().type === TokenType.ELLIPSIS) {
+        pos++;
+        lastParseVariadic = true;
+        break;
+      }
       params.push(parseOneParam());
     }
     return params;
@@ -1292,8 +1363,9 @@ export function parse(tokens: Token[]): Program {
 
     const typeSpec = parseTypeSpec();
 
-    // Skip optional * for pointer types at top level
-    if (current().type === TokenType.STAR) pos++;
+    // Track optional * for pointer return types at top level
+    const returnPointer = current().type === TokenType.STAR;
+    if (returnPointer) pos++;
 
     const name = expect(TokenType.IDENTIFIER, "declaration name").value;
 
@@ -1317,16 +1389,17 @@ export function parse(tokens: Token[]): Program {
     // Function or extern: type ident(...)
     expect(TokenType.LPAREN, "'(' or '=' after declaration name");
     const params = parseParamList();
+    const variadic = lastParseVariadic || undefined;
     expect(TokenType.RPAREN, "')'");
 
     // Function prototype ending with ';' (no body)
     if (current().type === TokenType.SEMICOLON) {
       pos++;
       if (quals.isExtern) {
-        return { type: "ExternFunctionDeclaration", name, returnType: typeSpec, params };
+        return { type: "ExternFunctionDeclaration", name, returnType: typeSpec, params, returnPointer: returnPointer || undefined, variadic };
       }
       // Forward declaration (non-extern prototype)
-      return { type: "ForwardDeclaration", name, returnType: typeSpec, params };
+      return { type: "ForwardDeclaration", name, returnType: typeSpec, params, returnPointer: returnPointer || undefined, variadic };
     }
 
     expect(TokenType.LBRACE, "'{'");
@@ -1335,7 +1408,7 @@ export function parse(tokens: Token[]): Program {
       body.push(parseStatement());
     }
     expect(TokenType.RBRACE, "'}'");
-    return { type: "FunctionDeclaration", name, returnType: typeSpec, params, body, isStatic: quals.isStatic || undefined };
+    return { type: "FunctionDeclaration", name, returnType: typeSpec, params, body, isStatic: quals.isStatic || undefined, returnPointer: returnPointer || undefined, variadic };
   }
 
   function parseProgram(): Program {

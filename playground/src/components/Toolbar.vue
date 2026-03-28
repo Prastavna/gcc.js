@@ -187,6 +187,14 @@ const examples: { label: string; code: string }[] = [
     label: 'Nested structs',
     code: `struct Line {\n    struct Point { int x; int y; } start;\n    struct Point end;\n};\n\nint main() {\n    struct Line ln;\n    ln.start.x = 1;\n    ln.start.y = 2;\n    ln.end.x = 3;\n    ln.end.y = 4;\n\n    struct Line ln2 = ln;\n    ln2.start.x = 99;\n\n    return ln.start.x + ln2.start.x;\n}`,
   },
+  {
+    label: 'Variadic sum',
+    code: `int sum(int count, ...) {\n    int total = 0;\n    va_list args;\n    va_start(args, count);\n    for (int i = 0; i < count; i = i + 1) {\n        total = total + va_arg(args, int);\n    }\n    va_end(args);\n    return total;\n}\n\nint main() {\n    return sum(4, 10, 20, 30, 40);\n}`,
+  },
+  {
+    label: 'Void ptr memcpy',
+    code: `void *memcpy(void *dest, void *src, int n) {\n    char *d = (char *)dest;\n    char *s = (char *)src;\n    for (int i = 0; i < n; i = i + 1) {\n        d[i] = s[i];\n    }\n    return dest;\n}\n\nint main() {\n    int a = 42, b = 0;\n    memcpy(&b, &a, sizeof(int));\n    return b;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)
@@ -209,6 +217,15 @@ import { ref } from 'vue'
 
     <!-- Right: actions -->
     <div class="flex items-center gap-2">
+      <!-- Download button -->
+      <button
+        v-if="downloadable"
+        class="rounded border border-[var(--color-border)] bg-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-colors cursor-pointer"
+        @click="emit('download')"
+      >
+        Download .wasm
+      </button>
+
       <!-- Examples dropdown -->
       <div class="relative">
         <button
@@ -231,15 +248,6 @@ import { ref } from 'vue'
           </button>
         </div>
       </div>
-
-      <!-- Download button -->
-      <button
-        v-if="downloadable"
-        class="rounded border border-[var(--color-border)] bg-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 transition-colors cursor-pointer"
-        @click="emit('download')"
-      >
-        Download .wasm
-      </button>
 
       <!-- Compile button -->
       <button

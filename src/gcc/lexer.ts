@@ -324,6 +324,14 @@ export function tokenize(source: string): Token[] {
       continue;
     }
 
+    // Ellipsis: ...
+    if (ch === "." && pos + 2 < source.length && source[pos + 1] === "." && source[pos + 2] === ".") {
+      tokens.push({ type: TokenType.ELLIPSIS, value: "...", line, col });
+      pos += 3;
+      col += 3;
+      continue;
+    }
+
     const simpleType = SIMPLE_TOKENS[ch];
     if (simpleType !== undefined) {
       tokens.push({ type: simpleType, value: ch, line, col });

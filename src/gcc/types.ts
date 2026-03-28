@@ -99,6 +99,9 @@ export const TokenType = {
   SLASH_EQUALS: "SLASH_EQUALS",     // /=
   PERCENT_EQUALS: "PERCENT_EQUALS", // %=
 
+  // Variadic
+  ELLIPSIS: "ELLIPSIS",       // ...
+
   // Special
   EOF: "EOF",
 } as const;
@@ -265,6 +268,14 @@ export interface CastExpression {
   type: "CastExpression";
   targetType: TypeSpecifier;
   operand: Expression;
+  pointer?: boolean;  // (char *)expr — cast to pointer type
+}
+
+/** va_arg(ap, type) — read next variadic argument */
+export interface VaArgExpression {
+  type: "VaArgExpression";
+  vaList: string;
+  argType: TypeSpecifier;
 }
 
 /** sizeof(type) — compile-time size constant */
@@ -334,7 +345,8 @@ export type Expression =
   | MemberAssignmentExpression
   | ArrowAccessExpression
   | ArrowAssignmentExpression
-  | CommaExpression;
+  | CommaExpression
+  | VaArgExpression;
 
 export interface ReturnStatement {
   type: "ReturnStatement";
@@ -458,6 +470,8 @@ export interface FunctionDeclaration {
   params: Parameter[];
   body: Statement[];
   isStatic?: boolean;
+  returnPointer?: boolean;
+  variadic?: boolean;
 }
 
 export interface ExternFunctionDeclaration {
@@ -465,6 +479,8 @@ export interface ExternFunctionDeclaration {
   name: string;
   returnType: TypeSpecifier;
   params: Parameter[];
+  returnPointer?: boolean;
+  variadic?: boolean;
 }
 
 export interface ForwardDeclaration {
@@ -472,6 +488,8 @@ export interface ForwardDeclaration {
   name: string;
   returnType: TypeSpecifier;
   params: Parameter[];
+  returnPointer?: boolean;
+  variadic?: boolean;
 }
 
 export interface GlobalVariableDeclaration {

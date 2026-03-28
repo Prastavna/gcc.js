@@ -1005,4 +1005,50 @@ describe("parser", () => {
       expect(decl.initializer.name).toBe("p1");
     });
   });
+
+  // ── M25: Void pointers and variadic functions ─────────────
+  describe("M25: void pointers and variadic functions", () => {
+    it("parses multiple declarators", () => {
+      const ast = parseSource("int main() { int a = 10, b = 20; return a + b; }");
+      const func = ast.declarations[0] as any;
+      expect(func.body[0].type).toBe("VariableDeclaration");
+      expect(func.body[0].name).toBe("a");
+      expect(func.body[1].type).toBe("VariableDeclaration");
+      expect(func.body[1].name).toBe("b");
+    });
+
+    it("parses pointer cast expression", () => {
+      const ast = parseSource("int main() { int x = 1; void *p = &x; int *ip = (int *)p; return *ip; }");
+      const func = ast.declarations[0] as any;
+      const castDecl = func.body[2]; // int *ip = (int *)p
+      expect(castDecl.pointer).toBe(true);
+      expect(castDecl.initializer.type).toBe("CastExpression");
+      expect(castDecl.initializer.pointer).toBe(true);
+    });
+
+    it("parses variadic function declaration", () => {
+      const ast = parseSource("int sum(int count, ...) { return 0; }");
+      const func = ast.declarations[0] as any;
+      expect(func.type).toBe("FunctionDeclaration");
+      expect(func.variadic).toBe(true);
+      expect(func.params.length).toBe(1);
+      expect(func.params[0].name).toBe("count");
+    });
+
+    it("parses va_arg expression", () => {
+      const ast = parseSource("int sum(int count, ...) { va_list args; va_start(args, count); int x = va_arg(args, int); va_end(args); return x; }");
+      const func = ast.declarations[0] as any;
+      const vaArgDecl = func.body[2]; // int x = va_arg(args, int)
+      expect(vaArgDecl.initializer.type).toBe("VaArgExpression");
+      expect(vaArgDecl.initializer.vaList).toBe("args");
+      expect(vaArgDecl.initializer.argType).toBe("int");
+    });
+
+    it("parses void pointer return type", () => {
+      const ast = parseSource("void *get_ptr(int *p) { return p; }");
+      const func = ast.declarations[0] as any;
+      expect(func.returnPointer).toBe(true);
+      expect(func.returnType).toBe("void");
+    });
+  });
 });

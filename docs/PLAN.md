@@ -527,7 +527,7 @@ int main() {
 - [x] Struct assignment (copy by value: `a = b`)
 - [x] Struct initializer lists (`struct Point p = {1, 2}`)
 
-### Milestone 25: void pointers and variadic functions
+### Milestone 25: void pointers and variadic functions [DONE]
 ```c
 void *memcpy(void *dest, void *src, int n) {
     char *d = (char *)dest;
@@ -557,12 +557,12 @@ int main() {
     return b + sum(3, 1, 2, 3);
 }
 ```
-- [ ] `void *` type (generic pointer, implicit cast to/from any pointer)
-- [ ] Casting between `void *` and typed pointers
-- [ ] `void *` function parameters and return types
-- [ ] Variadic function declarations (`int printf(char *fmt, ...)`)
-- [ ] `va_list`, `va_start`, `va_arg`, `va_end` (built-in macros/types)
-- [ ] Multiple declarators in one statement (`int a = 10, b = 20;`)
+- [x] `void *` type (generic pointer, implicit cast to/from any pointer)
+- [x] Casting between `void *` and typed pointers
+- [x] `void *` function parameters and return types
+- [x] Variadic function declarations (`int printf(char *fmt, ...)`)
+- [x] `va_list`, `va_start`, `va_arg`, `va_end` (built-in macros/types)
+- [x] Multiple declarators in one statement (`int a = 10, b = 20;`)
 
 ### Milestone 26: C89 graduation test
 ```c

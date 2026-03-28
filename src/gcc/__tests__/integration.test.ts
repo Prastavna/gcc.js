@@ -3735,4 +3735,169 @@ describe("integration: compile() end-to-end", () => {
       expect((instance.exports.main as () => number)()).toBe(100);
     });
   });
+
+  // ── M25: Void pointers and variadic functions ─────────────
+  describe("M25: void pointers and variadic functions", () => {
+    it("multiple declarators: int a = 10, b = 20", async () => {
+      const source = `
+        int main() {
+            int a = 10, b = 20;
+            return a + b;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(30);
+    });
+
+    it("multiple declarators with uninitialized", async () => {
+      const source = `
+        int main() {
+            int a = 5, b, c = 3;
+            b = 7;
+            return a + b + c;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(15);
+    });
+
+    it("void pointer assignment and cast", async () => {
+      const source = `
+        int main() {
+            int x = 42;
+            void *p = &x;
+            int *ip = (int *)p;
+            return *ip;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("void pointer function parameter", async () => {
+      const source = `
+        int read_int(void *p) {
+            int *ip = (int *)p;
+            return *ip;
+        }
+        int main() {
+            int x = 99;
+            return read_int(&x);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(99);
+    });
+
+    it("void pointer return type", async () => {
+      const source = `
+        void *get_ptr(int *p) {
+            return p;
+        }
+        int main() {
+            int x = 77;
+            void *p = get_ptr(&x);
+            int *ip = (int *)p;
+            return *ip;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(77);
+    });
+
+    it("memcpy with void pointers", async () => {
+      const source = `
+        void *memcpy(void *dest, void *src, int n) {
+            char *d = (char *)dest;
+            char *s = (char *)src;
+            for (int i = 0; i < n; i = i + 1) {
+                d[i] = s[i];
+            }
+            return dest;
+        }
+        int main() {
+            int a = 42;
+            int b = 0;
+            memcpy(&b, &a, sizeof(int));
+            return b;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    });
+
+    it("variadic function: sum", async () => {
+      const source = `
+        int sum(int count, ...) {
+            int total = 0;
+            va_list args;
+            va_start(args, count);
+            for (int i = 0; i < count; i = i + 1) {
+                total = total + va_arg(args, int);
+            }
+            va_end(args);
+            return total;
+        }
+        int main() {
+            return sum(3, 1, 2, 3);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(6);
+    });
+
+    it("variadic function: max of N values", async () => {
+      const source = `
+        int max_of(int count, ...) {
+            va_list args;
+            va_start(args, count);
+            int best = va_arg(args, int);
+            for (int i = 1; i < count; i = i + 1) {
+                int v = va_arg(args, int);
+                if (v > best) best = v;
+            }
+            va_end(args);
+            return best;
+        }
+        int main() {
+            return max_of(5, 3, 7, 2, 9, 1);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(9);
+    });
+
+    it("full M25 target program", async () => {
+      const source = `
+        void *memcpy(void *dest, void *src, int n) {
+            char *d = (char *)dest;
+            char *s = (char *)src;
+            for (int i = 0; i < n; i = i + 1) {
+                d[i] = s[i];
+            }
+            return dest;
+        }
+
+        int sum(int count, ...) {
+            int total = 0;
+            va_list args;
+            va_start(args, count);
+            for (int i = 0; i < count; i = i + 1) {
+                total = total + va_arg(args, int);
+            }
+            va_end(args);
+            return total;
+        }
+
+        int main() {
+            int a = 10, b = 20;
+            void *p = &a;
+            memcpy(&b, &a, sizeof(int));
+            return b + sum(3, 1, 2, 3);
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(16);
+    });
+  });
 });

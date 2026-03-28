@@ -151,7 +151,7 @@ const wasmBytes = generate(ast);
 
 ---
 
-## Supported C Subset (through Milestone 24)
+## Supported C Subset (through Milestone 25)
 
 ### Types
 - `int` (32-bit signed), `char` (8-bit signed), `short` (16-bit signed), `long` (64-bit signed), `void`
@@ -161,7 +161,9 @@ const wasmBytes = generate(ast);
 - `enum` declarations with auto-increment and explicit values
 - `typedef` type aliases
 - `union` (overlapping memory layout)
+- `void *` generic pointer type (implicit cast to/from any pointer)
 - Type casting: `(int)expr`, `(char)expr`, `(short)expr`, `(long)expr`, `(float)expr`, `(double)expr`, `(unsigned int)expr`, `(unsigned short)expr`, `(signed int)expr`
+- Pointer casts: `(char *)expr`, `(int *)expr`, `(void *)expr`
 - `sizeof(type)` — compile-time constant (char=1, short=2, int=4, float=4, long=8, double=8, union=max field)
 - Implicit promotion in mixed expressions (char < short < int < long < float < double)
 
@@ -186,6 +188,9 @@ const wasmBytes = generate(ast);
 - Function pointer variables: `int (*fp)(int, int) = add;`
 - Function pointer parameters: `int apply(int (*op)(int, int), int x, int y)`
 - `typedef` for function pointers: `typedef int (*BinOp)(int, int);`
+- Variadic functions: `int sum(int count, ...)` with `va_list`, `va_start`, `va_arg`, `va_end`
+- Multiple declarators: `int a = 10, b = 20;`
+- Pointer return types: `void *memcpy(void *dest, void *src, int n)`
 - Local variables: `int x = 10;`, `char c = 'A';`, `long big = 100000;`, `float f = 3.14f;`, `double d = 2.718;`
 - Global variables: `int counter = 0;`
 - Arrays: `int arr[5] = {1, 2, 3, 4, 5};`, multi-dimensional: `int m[3][4];`

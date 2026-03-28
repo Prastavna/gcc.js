@@ -153,6 +153,9 @@ let structDefs: Map<string, StructDef> = new Map();
 let mallocUsed = false;
 let tableUsed = false;
 let heapPtrGlobalIdx = 0;
+let varargsAreaAddr = 0;
+let varargsUsed = false;
+const VARARGS_AREA_SIZE = 1024;
 
 /**
  * Generates a WASM binary module from a Program AST.
@@ -163,6 +166,8 @@ export function generate(ast: Program): Uint8Array {
   stringData = [];
   structDefs = new Map();
   mallocUsed = false;
+  varargsUsed = false;
+  varargsAreaAddr = 0;
 
   // Separate declarations by kind
   const externs: ExternFunctionDeclaration[] = [];
@@ -185,7 +190,7 @@ export function generate(ast: Program): Uint8Array {
   const funcNames = new Set(funcs.map(f => f.name));
   for (const fwd of forwards) {
     if (!funcNames.has(fwd.name)) {
-      externs.push({ type: "ExternFunctionDeclaration", name: fwd.name, returnType: fwd.returnType, params: fwd.params });
+      externs.push({ type: "ExternFunctionDeclaration", name: fwd.name, returnType: fwd.returnType, params: fwd.params, returnPointer: fwd.returnPointer, variadic: fwd.variadic });
     }
     // else: true forward declaration — function definition exists, skip
   }
@@ -213,12 +218,16 @@ export function generate(ast: Program): Uint8Array {
   const funcParamTypes = new Map<string, CType[]>();
   // Maps funcName -> paramIndex -> structName for struct params
   const funcStructParams = new Map<string, Map<number, string>>();
+  // Track variadic functions
+  const variadicFuncs = new Set<string>();
   for (const ext of externs) {
-    funcReturnTypes.set(ext.name, typeSpecToCType(ext.returnType || "int"));
-    funcParamTypes.set(ext.name, ext.params.map(p => typeSpecToCType(p.typeSpec || "int")));
+    funcReturnTypes.set(ext.name, ext.returnPointer ? "int" : typeSpecToCType(ext.returnType || "int"));
+    funcParamTypes.set(ext.name, ext.params.map(p => p.pointer ? "int" : typeSpecToCType(p.typeSpec || "int")));
+    if (ext.variadic) variadicFuncs.add(ext.name);
   }
   for (const func of funcs) {
-    funcReturnTypes.set(func.name, typeSpecToCType(func.returnType || "int"));
+    funcReturnTypes.set(func.name, func.returnPointer ? "int" : typeSpecToCType(func.returnType || "int"));
+    if (func.variadic) variadicFuncs.add(func.name);
     const paramCTypes: CType[] = [];
     const structParams = new Map<number, string>();
     for (let i = 0; i < func.params.length; i++) {
@@ -279,19 +288,27 @@ export function generate(ast: Program): Uint8Array {
     return idx;
   }
 
+  // Helper: get WASM type for a parameter (pointer params are always i32)
+  function paramWasmType(p: { typeSpec: TypeSpecifier; pointer?: boolean }): number {
+    return p.pointer ? ValType.I32 : wasmTypeFor(typeSpecToCType(p.typeSpec || "int"));
+  }
+  function declRetWasmType(d: { returnType: TypeSpecifier; returnPointer?: boolean }): number {
+    return d.returnPointer ? ValType.I32 : wasmTypeFor(typeSpecToCType(d.returnType || "int"));
+  }
+
   // Type indices for imported functions
   const importTypeIndices: number[] = [];
   for (const ext of externs) {
-    const paramTypes = ext.params.map(p => wasmTypeFor(typeSpecToCType(p.typeSpec || "int")));
-    const retType = wasmTypeFor(typeSpecToCType(ext.returnType || "int"));
+    const paramTypes = ext.params.map(p => paramWasmType(p));
+    const retType = declRetWasmType(ext);
     importTypeIndices.push(getTypeIdx(paramTypes, retType));
   }
 
   // Type indices for local functions
   const funcTypeIndices: number[] = [];
   for (const func of funcs) {
-    const paramTypes = func.params.map(p => wasmTypeFor(typeSpecToCType(p.typeSpec || "int")));
-    const retType = wasmTypeFor(typeSpecToCType(func.returnType || "int"));
+    const paramTypes = func.params.map(p => paramWasmType(p));
+    const retType = declRetWasmType(func);
     funcTypeIndices.push(getTypeIdx(paramTypes, retType));
   }
 
@@ -302,30 +319,36 @@ export function generate(ast: Program): Uint8Array {
   let tableIdx = 1; // 0 = null/invalid
   for (const ext of externs) {
     funcTableIndex.set(ext.name, tableIdx++);
-    const ptypes = ext.params.map(p => wasmTypeFor(typeSpecToCType(p.typeSpec || "int")));
-    const rtype = wasmTypeFor(typeSpecToCType(ext.returnType || "int"));
-    funcPtrTypeIndices.set(ext.name, getTypeIdx(ptypes, rtype));
+    funcPtrTypeIndices.set(ext.name, getTypeIdx(ext.params.map(p => paramWasmType(p)), declRetWasmType(ext)));
   }
   for (const func of funcs) {
     funcTableIndex.set(func.name, tableIdx++);
-    const ptypes = func.params.map(p => wasmTypeFor(typeSpecToCType(p.typeSpec || "int")));
-    const rtype = wasmTypeFor(typeSpecToCType(func.returnType || "int"));
-    funcPtrTypeIndices.set(func.name, getTypeIdx(ptypes, rtype));
+    funcPtrTypeIndices.set(func.name, getTypeIdx(func.params.map(p => paramWasmType(p)), declRetWasmType(func)));
   }
   const tableSize = tableIdx;
   tableUsed = false;
 
   // Detect if memory is needed
   if (stringData.length > 0) memoryUsed = true;
+  if (variadicFuncs.size > 0) { memoryUsed = true; varargsUsed = true; }
   for (const func of funcs) {
     if (functionUsesMemory(func)) { memoryUsed = true; break; }
+  }
+
+  // Pre-allocate varargs area so all functions see the same address
+  if (varargsUsed) {
+    while (nextMemAddr % 4 !== 0) nextMemAddr++;
+    // Ensure non-zero address (avoid address 0 confusion)
+    if (nextMemAddr === 0) nextMemAddr = 4;
+    varargsAreaAddr = nextMemAddr;
+    nextMemAddr += VARARGS_AREA_SIZE;
   }
 
   // Heap pointer global index is after user globals
   heapPtrGlobalIdx = globals.length;
 
   // Build code section FIRST — it finalizes nextMemAddr and mallocUsed
-  const codeSection = buildCodeSection(funcs, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, funcTableIndex, funcPtrTypeIndices);
+  const codeSection = buildCodeSection(funcs, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, funcTableIndex, funcPtrTypeIndices, variadicFuncs);
 
   // If malloc was used, we need memory and the heap pointer global
   if (mallocUsed) memoryUsed = true;
@@ -434,6 +457,7 @@ function collectStringsFromExpr(expr: Expression, cb: (s: string) => void): void
     case "MemberAssignmentExpression": collectStringsFromExpr(expr.value, cb); break;
     case "ArrowAssignmentExpression": collectStringsFromExpr(expr.value, cb); break;
     case "CommaExpression": expr.expressions.forEach(e => collectStringsFromExpr(e, cb)); break;
+    case "VaArgExpression": break;
     default: break;
   }
 }
@@ -441,6 +465,8 @@ function collectStringsFromExpr(expr: Expression, cb: (s: string) => void): void
 // ── Memory usage detection ───────────────────────────────
 
 function functionUsesMemory(func: FunctionDeclaration): boolean {
+  // Variadic functions use memory for the varargs area
+  if (func.variadic) return true;
   // Struct params use memory
   for (const p of func.params) {
     if (typeof p.typeSpec === "object" && p.typeSpec.kind === "struct") return true;
@@ -487,11 +513,12 @@ function exprUsesMemory(expr: Expression): boolean {
     case "UnaryExpression": return exprUsesMemory(expr.operand);
     case "AssignmentExpression": return exprUsesMemory(expr.value);
     case "CompoundAssignmentExpression": return exprUsesMemory(expr.value);
-    case "CallExpression": return expr.callee === "malloc" || expr.callee === "free" || expr.args.some(exprUsesMemory);
+    case "CallExpression": return expr.callee === "malloc" || expr.callee === "free" || expr.callee === "va_start" || expr.callee === "va_end" || expr.args.some(exprUsesMemory);
     case "LogicalExpression": return exprUsesMemory(expr.left) || exprUsesMemory(expr.right);
     case "TernaryExpression": return exprUsesMemory(expr.condition) || exprUsesMemory(expr.consequent) || exprUsesMemory(expr.alternate);
     case "CastExpression": return exprUsesMemory(expr.operand);
     case "CommaExpression": return expr.expressions.some(exprUsesMemory);
+    case "VaArgExpression": return true; // reads from varargs memory area
     default: return false;
   }
 }
@@ -661,10 +688,11 @@ function buildCodeSection(
   funcStructParams: Map<string, Map<number, string>>,
   funcTableIndex: Map<string, number>,
   funcPtrTypeIndices: Map<string, number>,
+  variadicFuncs: Set<string>,
 ): number[] {
   const bodies: number[] = [];
   for (const func of funcs) {
-    bodies.push(...buildFunctionBody(func, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, funcTableIndex, funcPtrTypeIndices));
+    bodies.push(...buildFunctionBody(func, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, funcTableIndex, funcPtrTypeIndices, variadicFuncs));
   }
   const content = [...encodeUnsignedLEB128(funcs.length), ...bodies];
   return makeSection(Section.CODE, content);
@@ -794,6 +822,7 @@ function findATInExpr(expr: Expression, taken: Set<string>): void {
     case "MemberAssignmentExpression": findATInExpr(expr.value, taken); break;
     case "ArrowAssignmentExpression": findATInExpr(expr.value, taken); break;
     case "CommaExpression": expr.expressions.forEach(e => findATInExpr(e, taken)); break;
+    case "VaArgExpression": break;
     default: break;
   }
 }
@@ -821,6 +850,7 @@ type Ctx = {
   funcPtrTypeIndices: Map<string, number>; // function name -> type index (for call_indirect)
   funcPtrVarTypeIndices: Map<string, number>; // variable name -> type index for call_indirect
   funcPtrVarReturnTypes: Map<string, CType>; // variable name -> return type
+  variadicFuncs: Set<string>; // functions declared with ...
   breakDepth: number | null;  // BR depth for break (null = not in a loop/switch)
   continueDepth: number | null; // BR depth for continue (null = not in a loop)
   switchTmpIdx: number | null; // local index for switch temp variable
@@ -847,7 +877,7 @@ function collectAllVarNames(stmts: Statement[], names: Set<string>): void {
 /** Collect type specs for all variable declarations */
 function collectVarTypes(stmts: Statement[], types: Map<string, CType>): void {
   for (const s of stmts) {
-    if (s.type === "VariableDeclaration") types.set(s.name, typeSpecToCType(s.typeSpec || "int"));
+    if (s.type === "VariableDeclaration") types.set(s.name, s.pointer ? "int" : typeSpecToCType(s.typeSpec || "int"));
     if (s.type === "IfStatement") { collectVarTypes(s.consequent, types); if (s.alternate) collectVarTypes(s.alternate, types); }
     if (s.type === "WhileStatement") collectVarTypes(s.body, types);
     if (s.type === "DoWhileStatement") collectVarTypes(s.body, types);
@@ -868,17 +898,15 @@ function buildFunctionBody(
   funcStructParams: Map<string, Map<number, string>>,
   funcTableIndex: Map<string, number>,
   funcPtrTypeIndices: Map<string, number>,
+  variadicFuncs: Set<string>,
 ): number[] {
   const addressTaken = findAddressTakenVars(func);
   const locals = new Map<string, number>();
   const localTypes = new Map<string, CType>();
 
   // Params: WASM requires all params declared upfront with their types.
-  // We need i32 params first, then i64 params — but actually WASM params
-  // maintain declaration order. The key insight: params are indexed by
-  // their declaration order, and their types are fixed by the function signature.
   for (let i = 0; i < func.params.length; i++) {
-    const ptype = typeSpecToCType(func.params[i].typeSpec || "int");
+    const ptype = func.params[i].pointer ? "int" as CType : typeSpecToCType(func.params[i].typeSpec || "int");
     if (!addressTaken.has(func.params[i].name)) {
       locals.set(func.params[i].name, i);
       localTypes.set(func.params[i].name, ptype);
@@ -894,7 +922,7 @@ function buildFunctionBody(
     for (const stmt of stmts) {
       if (stmt.type === "VariableDeclaration" && !addressTaken.has(stmt.name)) {
         if (!allDeclaredVars.find(v => v.name === stmt.name)) {
-          const ctype = typeSpecToCType(stmt.typeSpec || "int");
+          const ctype = stmt.pointer ? "int" as CType : typeSpecToCType(stmt.typeSpec || "int");
           allDeclaredVars.push({ name: stmt.name, ctype });
         }
       }
@@ -1071,17 +1099,20 @@ function buildFunctionBody(
   }
   collectStructPtrTypes(func.body);
 
-  // Track primitive pointer variable types (int *p, char *p, long *p)
+  // Track primitive pointer variable types (int *p, char *p, void *p, long *p)
   const varPtrTypes = new Map<string, CType>();
   for (let i = 0; i < func.params.length; i++) {
     if (func.params[i].pointer && typeof func.params[i].typeSpec === "string") {
-      varPtrTypes.set(func.params[i].name, func.params[i].typeSpec as CType);
+      // void* treated as char* for pointer arithmetic (byte-addressed)
+      const elemType = func.params[i].typeSpec === "void" ? "char" as CType : func.params[i].typeSpec as CType;
+      varPtrTypes.set(func.params[i].name, elemType);
     }
   }
   function collectPtrTypes(stmts: Statement[]): void {
     for (const s of stmts) {
       if (s.type === "VariableDeclaration" && s.pointer && typeof s.typeSpec === "string") {
-        varPtrTypes.set(s.name, s.typeSpec as CType);
+        const elemType = s.typeSpec === "void" ? "char" as CType : s.typeSpec as CType;
+        varPtrTypes.set(s.name, elemType);
       }
       if (s.type === "IfStatement") { collectPtrTypes(s.consequent); if (s.alternate) collectPtrTypes(s.alternate); }
       if (s.type === "WhileStatement") collectPtrTypes(s.body);
@@ -1093,7 +1124,7 @@ function buildFunctionBody(
   }
   collectPtrTypes(func.body);
 
-  const returnType = typeSpecToCType(func.returnType || "int");
+  const returnType = func.returnPointer ? "int" as CType : typeSpecToCType(func.returnType || "int");
 
   // Collect goto labels from the function body (top-level only for now)
   const gotoLabels = new Map<string, number>();
@@ -1179,7 +1210,7 @@ function buildFunctionBody(
   }
   scanFuncPtrDecls(func.body);
 
-  const ctx: Ctx = { locals, localTypes, memVars, memVarTypes, arrayVars, structVars, structParamVars, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, varStructPtrTypes, varPtrTypes, funcTableIndex, funcPtrTypeIndices: funcPtrTypeIndices, funcPtrVarTypeIndices, funcPtrVarReturnTypes, breakDepth: null, continueDepth: null, switchTmpIdx, returnType, gotoStateIdx, gotoLabels, gotoDispatchDepth: null };
+  const ctx: Ctx = { locals, localTypes, memVars, memVarTypes, arrayVars, structVars, structParamVars, funcIndex, stringMap, globalIndex, globalTypes, funcReturnTypes, funcParamTypes, funcStructParams, varStructPtrTypes, varPtrTypes, funcTableIndex, funcPtrTypeIndices: funcPtrTypeIndices, funcPtrVarTypeIndices, funcPtrVarReturnTypes, variadicFuncs, breakDepth: null, continueDepth: null, switchTmpIdx, returnType, gotoStateIdx, gotoLabels, gotoDispatchDepth: null };
   const instructions: number[] = [];
 
   for (const ap of atParamCopies) {
@@ -1615,8 +1646,8 @@ function exprProducesValue(expr: Expression): boolean {
     case "ArrowAssignmentExpression":
       return false;
     case "CallExpression":
-      // Built-in free returns void (no value on stack)
-      return expr.callee !== "free";
+      // Built-in free, va_start, va_end return void (no value on stack)
+      return expr.callee !== "free" && expr.callee !== "va_start" && expr.callee !== "va_end";
     case "CommaExpression":
       // The last expression determines if a value is produced
       return exprProducesValue(expr.expressions[expr.expressions.length - 1]);
@@ -1647,7 +1678,7 @@ function inferType(expr: Expression, ctx: Ctx): CType {
       if (expr.operator === "!") return "int";
       if (expr.operator === "~") return inferType(expr.operand, ctx);
       return inferType(expr.operand, ctx);
-    case "CastExpression": return typeSpecToCType(expr.targetType);
+    case "CastExpression": return expr.pointer ? "int" : typeSpecToCType(expr.targetType);
     case "CallExpression": {
       if (expr.indirect) return ctx.funcPtrVarReturnTypes?.get(expr.callee) || "int";
       return ctx.funcReturnTypes.get(expr.callee) || "int";
@@ -1667,6 +1698,7 @@ function inferType(expr: Expression, ctx: Ctx): CType {
     case "ArrowAccessExpression": return "int";
     case "ArrowAssignmentExpression": return "void";
     case "CommaExpression": return inferType(expr.expressions[expr.expressions.length - 1], ctx);
+    case "VaArgExpression": return typeSpecToCType(expr.argType);
   }
 }
 
@@ -2014,9 +2046,22 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       return "int";
     case "CastExpression": {
       const srcType = emitExpression(out, expr.operand, ctx);
-      const targetType = typeSpecToCType(expr.targetType);
+      const targetType = expr.pointer ? "int" as CType : typeSpecToCType(expr.targetType);
       emitConversion(out, srcType, targetType);
       return targetType;
+    }
+    case "VaArgExpression": {
+      const argCType = typeSpecToCType(expr.argType);
+      const argSize = Math.max(sizeOfType(argCType), 4); // minimum word size
+      // Load value at current va_list pointer: *ap
+      emitVarGet(out, expr.vaList, ctx);
+      emitMemLoad(out, argCType);
+      // Advance: ap = ap + sizeof(type)
+      emitVarGet(out, expr.vaList, ctx);
+      out.push(Op.I32_CONST, ...encodeSignedLEB128(argSize));
+      out.push(Op.I32_ADD);
+      emitVarSet(out, expr.vaList, ctx);
+      return argCType;
     }
     case "Identifier":
       // Array name decays to pointer (base address)
@@ -2136,6 +2181,18 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
         }
         return "void";
       }
+      // Built-in va_start(ap, lastParam): set ap = varargs area address
+      if (expr.callee === "va_start") {
+        // ap = varargsAreaAddr (pre-allocated in generate())
+        const apName = (expr.args[0] as any).name;
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(varargsAreaAddr));
+        emitVarSet(out, apName, ctx);
+        return "void";
+      }
+      // Built-in va_end(ap): no-op
+      if (expr.callee === "va_end") {
+        return "void";
+      }
       // Indirect call through function pointer variable
       if (expr.indirect) {
         tableUsed = true;
@@ -2158,7 +2215,22 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       if (fIdx === undefined) throw new Error(`Unknown function '${expr.callee}'`);
       const paramTypes = ctx.funcParamTypes.get(expr.callee);
       const calleeSP = ctx.funcStructParams.get(expr.callee);
-      for (let i = 0; i < expr.args.length; i++) {
+      const isVariadic = ctx.variadicFuncs.has(expr.callee);
+      const fixedParamCount = paramTypes ? paramTypes.length : 0;
+
+      // For variadic calls, write extra args to the varargs memory area FIRST
+      if (isVariadic && expr.args.length > fixedParamCount) {
+        let vaOffset = 0;
+        for (let i = fixedParamCount; i < expr.args.length; i++) {
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(varargsAreaAddr + vaOffset));
+          const argType = emitExpression(out, expr.args[i], ctx);
+          emitMemStore(out, argType === "void" ? "int" : argType);
+          vaOffset += Math.max(sizeOfType(argType === "void" ? "int" : argType), 4);
+        }
+      }
+
+      // Emit fixed args onto the WASM stack
+      for (let i = 0; i < fixedParamCount && i < expr.args.length; i++) {
         // Check if this arg is a struct being passed by value
         if (calleeSP && calleeSP.has(i) && expr.args[i].type === "Identifier") {
           const argName = expr.args[i].type === "Identifier" ? (expr.args[i] as any).name : null;
@@ -2203,6 +2275,15 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
         const argType = emitExpression(out, expr.args[i], ctx);
         if (paramTypes && i < paramTypes.length) {
           emitConversion(out, argType, paramTypes[i]);
+        }
+      }
+      // For non-variadic functions, also emit any remaining args beyond fixed params
+      if (!isVariadic) {
+        for (let i = fixedParamCount; i < expr.args.length; i++) {
+          const argType = emitExpression(out, expr.args[i], ctx);
+          if (paramTypes && i < paramTypes.length) {
+            emitConversion(out, argType, paramTypes[i]);
+          }
         }
       }
       out.push(Op.CALL, ...encodeUnsignedLEB128(fIdx));

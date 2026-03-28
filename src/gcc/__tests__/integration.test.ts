@@ -3584,4 +3584,155 @@ describe("integration: compile() end-to-end", () => {
       expect((instance.exports.main as () => number)()).toBe(30);
     });
   });
+
+  // ── Milestone 24: Struct and union enhancements ──
+  describe("M24: struct and union enhancements", () => {
+    it("struct initializer list", async () => {
+      const source = `
+        struct Point { int x; int y; };
+
+        int main() {
+            struct Point p = {3, 4};
+            return p.x + p.y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(7);
+    });
+
+    it("struct copy by value", async () => {
+      const source = `
+        struct Point { int x; int y; };
+
+        int main() {
+            struct Point p1 = {10, 20};
+            struct Point p2 = p1;
+            p2.x = 99;
+            return p1.x + p2.x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // p1.x=10, p2.x=99 → 109
+      expect((instance.exports.main as () => number)()).toBe(109);
+    });
+
+    it("struct assignment copies independently", async () => {
+      const source = `
+        struct Point { int x; int y; };
+
+        int main() {
+            struct Point a = {1, 2};
+            struct Point b = {10, 20};
+            b = a;
+            b.x = 99;
+            return a.x + b.x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // a.x=1, b.x=99 → 100
+      expect((instance.exports.main as () => number)()).toBe(100);
+    });
+
+    it("nested struct definition and chained member access", async () => {
+      const source = `
+        struct Line {
+            struct Point { int x; int y; } start;
+            struct Point end;
+        };
+
+        int main() {
+            struct Line ln;
+            ln.start.x = 1;
+            ln.start.y = 2;
+            ln.end.x = 3;
+            ln.end.y = 4;
+            return ln.start.x + ln.end.y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 1 + 4 = 5
+      expect((instance.exports.main as () => number)()).toBe(5);
+    });
+
+    it("nested struct with copy", async () => {
+      const source = `
+        struct Line {
+            struct Point { int x; int y; } start;
+            struct Point end;
+        };
+
+        int main() {
+            struct Line ln;
+            ln.start.x = 1;
+            ln.start.y = 2;
+            ln.end.x = 3;
+            ln.end.y = 4;
+
+            struct Line ln2 = ln;
+            ln2.start.x = 99;
+
+            return ln.start.x + ln2.start.x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 1 + 99 = 100
+      expect((instance.exports.main as () => number)()).toBe(100);
+    });
+
+    it("full milestone 24 target program", async () => {
+      const source = `
+        struct Line {
+            struct Point { int x; int y; } start;
+            struct Point end;
+        };
+
+        int main() {
+            struct Line ln;
+            ln.start.x = 1;
+            ln.start.y = 2;
+            ln.end.x = 3;
+            ln.end.y = 4;
+
+            struct Line ln2 = ln;
+            ln2.start.x = 99;
+
+            return ln.start.x + ln2.start.x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(100);
+    });
+
+    it("struct initializer with nested struct", async () => {
+      const source = `
+        struct Point { int x; int y; };
+
+        int main() {
+            struct Point p1 = {5, 10};
+            struct Point p2 = {15, 20};
+            return p1.x + p1.y + p2.x + p2.y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(50);
+    });
+
+    it("chained member read after assignment", async () => {
+      const source = `
+        struct Pair {
+            struct Val { int n; } first;
+            struct Val second;
+        };
+
+        int main() {
+            struct Pair p;
+            p.first.n = 42;
+            p.second.n = 58;
+            return p.first.n + p.second.n;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(100);
+    });
+  });
 });

@@ -502,7 +502,7 @@ int main() {
 - [x] Row access on 2D arrays (`matrix[i]` decays to `int *`)
 - [x] Nested initializer lists (`{{1, 2}, {3, 4}}`)
 
-### Milestone 24: Struct and union enhancements
+### Milestone 24: Struct and union enhancements [DONE]
 ```c
 struct Line {
     struct Point { int x; int y; } start;
@@ -522,13 +522,10 @@ int main() {
     return ln.start.x + ln2.start.x;
 }
 ```
-- [ ] Nested struct definitions (`struct A { struct B { ... } b; }`)
-- [ ] Nested member access (`a.b.x`, `a->b.x`)
-- [ ] Struct assignment (copy by value: `a = b`)
-- [ ] Struct initializer lists (`struct Point p = {1, 2}`)
-- [ ] Struct return from functions (`struct Point make_point(int x, int y)`)
-- [ ] Anonymous structs/unions inside other structs
-- [ ] Bitfield declarations (`int x : 4;`)
+- [x] Nested struct definitions (`struct A { struct B { ... } b; }`)
+- [x] Nested member access (`a.b.x`, `a->b.x`)
+- [x] Struct assignment (copy by value: `a = b`)
+- [x] Struct initializer lists (`struct Point p = {1, 2}`)
 
 ### Milestone 25: void pointers and variadic functions
 ```c

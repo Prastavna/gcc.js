@@ -950,4 +950,59 @@ describe("parser", () => {
       expect(expr.object.type).toBe("ArrayAccessExpression");
     });
   });
+
+  // ── M24: Struct and union enhancements ──
+  describe("M24: struct enhancements", () => {
+    it("parses nested struct definition", () => {
+      const ast = parseSource("struct Line { struct Point { int x; int y; } start; struct Point end; };");
+      // Nested struct Point should be injected as first declaration
+      expect(ast.declarations[0].type).toBe("StructDeclaration");
+      expect((ast.declarations[0] as any).name).toBe("Point");
+      expect(ast.declarations[1].type).toBe("StructDeclaration");
+      expect((ast.declarations[1] as any).name).toBe("Line");
+    });
+
+    it("parses chained member access (a.b.x)", () => {
+      const ast = parseSource("struct Line { struct Point { int x; int y; } start; struct Point end; }; int main() { struct Line ln; return ln.start.x; }");
+      const func = ast.declarations.find((d: any) => d.type === "FunctionDeclaration") as any;
+      const ret = func.body[1] as any;
+      const expr = ret.expression;
+      expect(expr.type).toBe("MemberAccessExpression");
+      expect(expr.member).toBe("x");
+      expect(typeof expr.object).toBe("object");
+      expect(expr.object.type).toBe("MemberAccessExpression");
+      expect(expr.object.member).toBe("start");
+      expect(expr.object.object).toBe("ln");
+    });
+
+    it("parses chained member assignment (a.b.x = val)", () => {
+      const ast = parseSource("struct Line { struct Point { int x; int y; } start; struct Point end; }; int main() { struct Line ln; ln.start.x = 1; return 0; }");
+      const func = ast.declarations.find((d: any) => d.type === "FunctionDeclaration") as any;
+      const assign = func.body[1] as any;
+      const expr = assign.expression;
+      expect(expr.type).toBe("MemberAssignmentExpression");
+      expect(expr.member).toBe("x");
+      expect(typeof expr.object).toBe("object");
+      expect(expr.object.type).toBe("MemberAccessExpression");
+    });
+
+    it("parses struct initializer list", () => {
+      const ast = parseSource("struct Point { int x; int y; }; int main() { struct Point p = {1, 2}; return 0; }");
+      const func = ast.declarations.find((d: any) => d.type === "FunctionDeclaration") as any;
+      const decl = func.body[0];
+      expect(decl.type).toBe("StructVariableDeclaration");
+      expect(Array.isArray(decl.initializer)).toBe(true);
+      expect(decl.initializer.length).toBe(2);
+    });
+
+    it("parses struct copy declaration", () => {
+      const ast = parseSource("struct Point { int x; int y; }; int main() { struct Point p1; struct Point p2 = p1; return 0; }");
+      const func = ast.declarations.find((d: any) => d.type === "FunctionDeclaration") as any;
+      const decl = func.body[1];
+      expect(decl.type).toBe("StructVariableDeclaration");
+      expect(decl.initializer).toBeDefined();
+      expect(decl.initializer.type).toBe("Identifier");
+      expect(decl.initializer.name).toBe("p1");
+    });
+  });
 });

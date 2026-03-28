@@ -29,6 +29,8 @@ export function parse(tokens: Token[]): Program {
   const typedefs = new Map<string, TypeSpecifier>();
   // Track function pointer variables for indirect call detection
   const funcPtrVars = new Set<string>();
+  // Nested struct definitions discovered during field parsing
+  const nestedStructDecls: Declaration[] = [];
 
   function current(): Token {
     return tokens[pos];
@@ -188,24 +190,44 @@ export function parse(tokens: Token[]): Program {
       pos = savedPos;
     }
 
-    // ident.member = val (member assignment)
-    if (current().type === TokenType.IDENTIFIER && peek(1).type === TokenType.DOT && peek(2).type === TokenType.IDENTIFIER && peek(3).type === TokenType.EQUALS) {
-      const object = current().value;
-      pos += 2; // skip ident and dot
-      const member = expect(TokenType.IDENTIFIER, "member name").value;
-      pos++; // skip =
-      const value = parseAssignment();
-      return { type: "MemberAssignmentExpression", object, member, value };
-    }
-
-    // ident->member = val (arrow assignment)
-    if (current().type === TokenType.IDENTIFIER && peek(1).type === TokenType.ARROW && peek(2).type === TokenType.IDENTIFIER && peek(3).type === TokenType.EQUALS) {
-      const pointer = current().value;
-      pos += 2; // skip ident and ->
-      const member = expect(TokenType.IDENTIFIER, "member name").value;
-      pos++; // skip =
-      const value = parseAssignment();
-      return { type: "ArrowAssignmentExpression", pointer, member, value };
+    // ident.member = val, ident.member.member = val, ident->member = val, ident->member.member = val
+    if (current().type === TokenType.IDENTIFIER && (peek(1).type === TokenType.DOT || peek(1).type === TokenType.ARROW)) {
+      const savedPos = pos;
+      const name = current().value;
+      pos++; // skip ident
+      // Collect chain of (accessor, member) pairs
+      const chain: { isArrow: boolean; member: string }[] = [];
+      while (current().type === TokenType.DOT || current().type === TokenType.ARROW) {
+        const isArrow = current().type === TokenType.ARROW;
+        pos++; // skip . or ->
+        if (current().type !== TokenType.IDENTIFIER) { pos = savedPos; break; }
+        chain.push({ isArrow, member: current().value });
+        pos++; // skip member
+      }
+      if (chain.length > 0 && current().type === TokenType.EQUALS) {
+        pos++; // skip =
+        const value = parseAssignment();
+        if (chain.length === 1) {
+          // Simple: ident.member = val or ident->member = val
+          if (chain[0].isArrow) {
+            return { type: "ArrowAssignmentExpression", pointer: name, member: chain[0].member, value };
+          }
+          return { type: "MemberAssignmentExpression", object: name, member: chain[0].member, value };
+        }
+        // Chained: build intermediate accesses, last one becomes assignment
+        let object: string | Expression = name;
+        for (let i = 0; i < chain.length - 1; i++) {
+          if (chain[i].isArrow) {
+            object = { type: "ArrowAccessExpression", pointer: object as any, member: chain[i].member } as Expression;
+          } else {
+            object = { type: "MemberAccessExpression", object, member: chain[i].member } as Expression;
+          }
+        }
+        const last = chain[chain.length - 1];
+        return { type: "MemberAssignmentExpression", object, member: last.member, value };
+      }
+      // Not an assignment — backtrack
+      pos = savedPos;
     }
 
     // ident[expr] = val (array index assignment)  OR  ident = val  OR  ident += val
@@ -537,17 +559,29 @@ export function parse(tokens: Token[]): Program {
         }
         return result;
       }
-      // Member access: ident.member
+      // Member access: ident.member with chaining for ident.member.member...
       if (current().type === TokenType.DOT) {
         pos++; // skip .
         const member = expect(TokenType.IDENTIFIER, "member name after '.'").value;
-        return { type: "MemberAccessExpression", object: name, member };
+        let result: Expression = { type: "MemberAccessExpression", object: name, member };
+        while (current().type === TokenType.DOT) {
+          pos++; // skip .
+          const nextMember = expect(TokenType.IDENTIFIER, "member name after '.'").value;
+          result = { type: "MemberAccessExpression", object: result, member: nextMember };
+        }
+        return result;
       }
-      // Arrow access: ident->member
+      // Arrow access: ident->member with chaining for ident->member.member...
       if (current().type === TokenType.ARROW) {
         pos++; // skip ->
         const member = expect(TokenType.IDENTIFIER, "member name after '->'").value;
-        return { type: "ArrowAccessExpression", pointer: name, member };
+        let result: Expression = { type: "ArrowAccessExpression", pointer: name, member };
+        while (current().type === TokenType.DOT) {
+          pos++; // skip .
+          const nextMember = expect(TokenType.IDENTIFIER, "member name after '.'").value;
+          result = { type: "MemberAccessExpression", object: result, member: nextMember };
+        }
+        return result;
       }
       if (current().type === TokenType.LPAREN) {
         pos++;
@@ -640,32 +674,72 @@ export function parse(tokens: Token[]): Program {
       // After consuming qualifiers, must be a declaration — fall through to detection below
     }
 
-    // Struct variable declaration: struct Name varname;
+    // Struct variable declaration: struct Name varname; or struct Name varname = {1, 2}; or struct Name varname = other;
     if (
       current().type === TokenType.STRUCT &&
       peek(1).type === TokenType.IDENTIFIER &&
       peek(2).type === TokenType.IDENTIFIER &&
-      peek(3).type === TokenType.SEMICOLON
+      (peek(3).type === TokenType.SEMICOLON || peek(3).type === TokenType.EQUALS)
     ) {
       pos++; // skip struct
       const structName = expect(TokenType.IDENTIFIER, "struct name").value;
       const name = expect(TokenType.IDENTIFIER, "variable name").value;
+      let initializer: Expression[] | Expression | undefined;
+      if (current().type === TokenType.EQUALS) {
+        pos++; // skip =
+        if (current().type === TokenType.LBRACE) {
+          // Brace initializer: struct Point p = {1, 2};
+          pos++; // skip {
+          const list: Expression[] = [];
+          if (current().type !== TokenType.RBRACE) {
+            list.push(parseAssignment());
+            while (current().type === TokenType.COMMA) {
+              pos++;
+              list.push(parseAssignment());
+            }
+          }
+          expect(TokenType.RBRACE, "'}' after struct initializer");
+          initializer = list;
+        } else {
+          // Copy from another struct: struct Line ln2 = ln;
+          initializer = parseAssignment();
+        }
+      }
       expect(TokenType.SEMICOLON, "';' after struct variable declaration");
-      return { type: "StructVariableDeclaration", name, structName };
+      return { type: "StructVariableDeclaration", name, structName, initializer };
     }
 
-    // Union variable declaration: union Name varname;
+    // Union variable declaration: union Name varname; or union Name varname = {val};
     if (
       current().type === TokenType.UNION &&
       peek(1).type === TokenType.IDENTIFIER &&
       peek(2).type === TokenType.IDENTIFIER &&
-      peek(3).type === TokenType.SEMICOLON
+      (peek(3).type === TokenType.SEMICOLON || peek(3).type === TokenType.EQUALS)
     ) {
       pos++; // skip union
       const unionName = expect(TokenType.IDENTIFIER, "union name").value;
       const name = expect(TokenType.IDENTIFIER, "variable name").value;
+      let initializer: Expression[] | Expression | undefined;
+      if (current().type === TokenType.EQUALS) {
+        pos++; // skip =
+        if (current().type === TokenType.LBRACE) {
+          pos++;
+          const list: Expression[] = [];
+          if (current().type !== TokenType.RBRACE) {
+            list.push(parseAssignment());
+            while (current().type === TokenType.COMMA) {
+              pos++;
+              list.push(parseAssignment());
+            }
+          }
+          expect(TokenType.RBRACE, "'}' after union initializer");
+          initializer = list;
+        } else {
+          initializer = parseAssignment();
+        }
+      }
       expect(TokenType.SEMICOLON, "';' after union variable declaration");
-      return { type: "StructVariableDeclaration", name, structName: unionName };
+      return { type: "StructVariableDeclaration", name, structName: unionName, initializer };
     }
 
     // Pointer-to-struct variable: struct Name *varname = expr;
@@ -1087,16 +1161,30 @@ export function parse(tokens: Token[]): Program {
     return params;
   }
 
-  /** Parse struct/union fields, skipping optional * for pointer fields */
-  function parseFields(): { name: string; typeSpec: TypeSpecifier }[] {
-    const fields: { name: string; typeSpec: TypeSpecifier }[] = [];
+  /** Parse struct/union fields, supporting pointer fields and nested struct definitions */
+  function parseFields(): { name: string; typeSpec: TypeSpecifier; pointer?: boolean }[] {
+    const fields: { name: string; typeSpec: TypeSpecifier; pointer?: boolean }[] = [];
     while (current().type !== TokenType.RBRACE && current().type !== TokenType.EOF) {
-      const fieldType = parseTypeSpec();
+      let fieldType: TypeSpecifier;
+      // Nested struct definition: struct Name { ... } fieldName;
+      if (current().type === TokenType.STRUCT && peek(1).type === TokenType.IDENTIFIER && peek(2).type === TokenType.LBRACE) {
+        pos++; // skip struct
+        const nestedName = expect(TokenType.IDENTIFIER, "struct name").value;
+        expect(TokenType.LBRACE, "'{' after nested struct name");
+        const nestedFields = parseFields();
+        expect(TokenType.RBRACE, "'}' after nested struct fields");
+        // Register the nested struct as a top-level declaration (will be processed by codegen)
+        nestedStructDecls.push({ type: "StructDeclaration", name: nestedName, fields: nestedFields });
+        fieldType = { kind: "struct", name: nestedName };
+      } else {
+        fieldType = parseTypeSpec();
+      }
       // Skip optional * for pointer fields (struct Node *next;)
-      if (current().type === TokenType.STAR) pos++;
+      let pointer = false;
+      if (current().type === TokenType.STAR) { pos++; pointer = true; }
       const fieldName = expect(TokenType.IDENTIFIER, "field name").value;
       expect(TokenType.SEMICOLON, "';' after field declaration");
-      fields.push({ name: fieldName, typeSpec: fieldType });
+      fields.push({ name: fieldName, typeSpec: fieldType, pointer: pointer || undefined });
     }
     return fields;
   }
@@ -1255,6 +1343,10 @@ export function parse(tokens: Token[]): Program {
     while (current().type !== TokenType.EOF) {
       const decl = parseTopLevelDecl();
       if (decl !== null) declarations.push(decl);
+    }
+    // Inject nested struct definitions (discovered during field parsing) before other declarations
+    if (nestedStructDecls.length > 0) {
+      declarations.unshift(...nestedStructDecls);
     }
     return { type: "Program", declarations };
   }

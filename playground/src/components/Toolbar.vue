@@ -183,6 +183,10 @@ const examples: { label: string; code: string }[] = [
     label: 'Array of structs',
     code: `struct Point { int x; int y; };\n\nint main() {\n    struct Point pts[3] = {{1, 2}, {3, 4}, {5, 6}};\n    int sum = 0;\n    for (int i = 0; i < 3; i = i + 1) {\n        sum = sum + pts[i].x + pts[i].y;\n    }\n    return sum;\n}`,
   },
+  {
+    label: 'Nested structs',
+    code: `struct Line {\n    struct Point { int x; int y; } start;\n    struct Point end;\n};\n\nint main() {\n    struct Line ln;\n    ln.start.x = 1;\n    ln.start.y = 2;\n    ln.end.x = 3;\n    ln.end.y = 4;\n\n    struct Line ln2 = ln;\n    ln2.start.x = 99;\n\n    return ln.start.x + ln2.start.x;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

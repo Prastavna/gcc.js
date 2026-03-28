@@ -90,7 +90,7 @@ function emitConversion(out: number[], from: CType, to: CType): void {
 
 // ── Struct layout types ──────────────────────────────────
 
-type StructFieldInfo = { name: string; ctype: CType; offset: number };
+type StructFieldInfo = { name: string; ctype: CType; offset: number; structName?: string; fieldSize?: number };
 type StructDef = { name: string; fields: StructFieldInfo[]; size: number };
 
 function typeSpecToCType(ts: TypeSpecifier): CType {
@@ -106,15 +106,28 @@ function computeStructLayout(decl: StructDeclaration): StructDef {
   let offset = 0;
   const fields: StructFieldInfo[] = [];
   for (const f of decl.fields) {
-    const ctype = typeSpecToCType(f.typeSpec);
-    const size = sizeOfType(ctype);
-    // Natural alignment
-    while (offset % size !== 0) offset++;
-    fields.push({ name: f.name, ctype, offset });
-    offset += size;
+    // Check if field is a non-pointer struct type
+    const isNestedStruct = !f.pointer && typeof f.typeSpec === "object" && "kind" in f.typeSpec && f.typeSpec.kind === "struct";
+    if (isNestedStruct) {
+      const nestedName = (f.typeSpec as { kind: "struct"; name: string }).name;
+      const nestedDef = structDefs.get(nestedName);
+      if (!nestedDef) throw new Error(`Unknown nested struct type '${nestedName}'`);
+      const fieldSize = nestedDef.size;
+      const maxFieldAlign = Math.max(...nestedDef.fields.map(nf => nf.fieldSize || sizeOfType(nf.ctype)), 1);
+      while (offset % maxFieldAlign !== 0) offset++;
+      fields.push({ name: f.name, ctype: "int", offset, structName: nestedName, fieldSize });
+      offset += fieldSize;
+    } else {
+      const ctype = typeSpecToCType(f.typeSpec);
+      const size = sizeOfType(ctype);
+      while (offset % size !== 0) offset++;
+      fields.push({ name: f.name, ctype, offset });
+      offset += size;
+    }
   }
   // Align total size to largest field alignment
-  const maxAlign = Math.max(...fields.map(f => sizeOfType(f.ctype)), 1);
+  const fieldSizes = fields.map(f => f.fieldSize || sizeOfType(f.ctype));
+  const maxAlign = Math.max(...fieldSizes, 1);
   while (offset % maxAlign !== 0) offset++;
   return { name: decl.name, fields, size: offset };
 }
@@ -1323,9 +1336,36 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
       }
       break;
     }
-    case "StructVariableDeclaration":
-      // Memory is pre-allocated; nothing to emit
+    case "StructVariableDeclaration": {
+      // Memory is pre-allocated; emit initializer/copy if present
+      if (stmt.initializer) {
+        const sv = ctx.structVars.get(stmt.name);
+        if (!sv) break;
+        const def = structDefs.get(sv.structName);
+        if (!def) break;
+        if (Array.isArray(stmt.initializer)) {
+          // Brace initializer: struct Point p = {1, 2};
+          for (let i = 0; i < stmt.initializer.length && i < def.fields.length; i++) {
+            const field = def.fields[i];
+            if (field.structName) {
+              // Nested struct field — skip (would need nested init, not supported yet)
+              continue;
+            }
+            out.push(Op.I32_CONST, ...encodeSignedLEB128(sv.addr + field.offset));
+            emitExpression(out, stmt.initializer[i], ctx);
+            emitMemStore(out, field.ctype);
+          }
+        } else {
+          // Copy from another struct: struct Line ln2 = ln;
+          const srcVar = ctx.structVars.get((stmt.initializer as any).name);
+          if (srcVar) {
+            // Field-by-field copy
+            emitStructCopy(out, sv.addr, srcVar.addr, def);
+          }
+        }
+      }
       break;
+    }
     case "ArrayDeclaration": {
       const arrInfo = ctx.arrayVars.get(stmt.name)!;
       if (stmt.stringInit) {
@@ -1688,18 +1728,70 @@ function emitMemStore(out: number[], ctype: CType): void {
   }
 }
 
+/** Emit field-by-field copy of a struct from srcAddr to destAddr */
+function emitStructCopy(out: number[], destAddr: number, srcAddr: number, def: StructDef): void {
+  for (const field of def.fields) {
+    if (field.structName) {
+      // Nested struct — recursive copy
+      const nestedDef = structDefs.get(field.structName);
+      if (nestedDef) {
+        emitStructCopy(out, destAddr + field.offset, srcAddr + field.offset, nestedDef);
+      }
+    } else {
+      out.push(Op.I32_CONST, ...encodeSignedLEB128(destAddr + field.offset));
+      out.push(Op.I32_CONST, ...encodeSignedLEB128(srcAddr + field.offset));
+      emitMemLoad(out, field.ctype);
+      emitMemStore(out, field.ctype);
+    }
+  }
+}
+
 // ── Struct field resolution ──────────────────────────────
 
-/** Resolve the struct name from an expression (e.g., ArrayAccessExpression on a struct array) */
+/** Resolve the struct name from an expression (e.g., ArrayAccessExpression on a struct array, or MemberAccessExpression on a nested struct) */
 function resolveExprStructName(expr: Expression, ctx: Ctx): string {
   if (expr.type === "ArrayAccessExpression" && typeof expr.array === "string") {
     const arrInfo = ctx.arrayVars.get(expr.array);
     if (arrInfo?.structName) return arrInfo.structName;
-    // Check if it's a pointer-to-struct variable
     const sn = ctx.varStructPtrTypes.get(expr.array);
     if (sn) return sn;
   }
+  if (expr.type === "MemberAccessExpression") {
+    // Resolve the struct type of the member being accessed
+    // e.g., for ln.start where start is struct Point, return "Point"
+    const parentStructName = typeof expr.object === "string"
+      ? resolveVarStructName(expr.object, ctx)
+      : resolveExprStructName(expr.object, ctx);
+    if (parentStructName) {
+      const parentDef = structDefs.get(parentStructName);
+      if (parentDef) {
+        const field = parentDef.fields.find(f => f.name === expr.member);
+        if (field?.structName) return field.structName;
+      }
+    }
+  }
+  if (expr.type === "ArrowAccessExpression") {
+    const ptrStructName = typeof expr.pointer === "string"
+      ? ctx.varStructPtrTypes.get(expr.pointer)
+      : null;
+    if (ptrStructName) {
+      const parentDef = structDefs.get(ptrStructName);
+      if (parentDef) {
+        const field = parentDef.fields.find(f => f.name === expr.member);
+        if (field?.structName) return field.structName;
+      }
+    }
+  }
   throw new Error("Cannot resolve struct type from expression");
+}
+
+/** Resolve the struct name of a variable */
+function resolveVarStructName(name: string, ctx: Ctx): string | null {
+  const sv = ctx.structVars.get(name);
+  if (sv) return sv.structName;
+  const sp = ctx.structParamVars.get(name);
+  if (sp) return sp.structName;
+  return ctx.varStructPtrTypes.get(name) || null;
 }
 
 function resolveStructField(objectName: string, memberName: string, ctx: Ctx): { addr: number | null; fieldInfo: StructFieldInfo } {
@@ -1956,6 +2048,16 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       }
       return emitVarGet(out, expr.name, ctx);
     case "AssignmentExpression": {
+      // Check for struct-to-struct assignment: ln2 = ln
+      if (ctx.structVars.has(expr.name) && expr.value.type === "Identifier" && ctx.structVars.has(expr.value.name)) {
+        const dest = ctx.structVars.get(expr.name)!;
+        const src = ctx.structVars.get(expr.value.name)!;
+        const def = structDefs.get(dest.structName);
+        if (def) {
+          emitStructCopy(out, dest.addr, src.addr, def);
+          return "void";
+        }
+      }
       const varType = getVarType(expr.name, ctx);
       if (ctx.memVars.has(expr.name)) {
         out.push(Op.I32_CONST, ...encodeSignedLEB128(ctx.memVars.get(expr.name)!));
@@ -2337,7 +2439,7 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
     }
     case "MemberAccessExpression": {
       if (typeof expr.object !== "string") {
-        // Expression-based member access: e.g. pts[i].x — object is an address
+        // Expression-based member access: e.g. pts[i].x or ln.start.x — object is an address
         const structName = resolveExprStructName(expr.object, ctx);
         const def = structDefs.get(structName);
         if (!def) throw new Error(`Unknown struct type '${structName}'`);
@@ -2348,6 +2450,8 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
           out.push(Op.I32_CONST, ...encodeSignedLEB128(fieldInfo.offset));
           out.push(Op.I32_ADD);
         }
+        // If field is a nested struct, return address (don't load)
+        if (fieldInfo.structName) return "int";
         emitMemLoad(out, fieldInfo.ctype);
         return fieldInfo.ctype;
       }
@@ -2364,6 +2468,8 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
           out.push(Op.I32_ADD);
         }
       }
+      // If field is a nested struct, return address (don't load)
+      if (fieldInfo.structName) return "int";
       emitMemLoad(out, fieldInfo.ctype);
       return fieldInfo.ctype;
     }

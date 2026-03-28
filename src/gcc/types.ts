@@ -425,6 +425,7 @@ export interface StructVariableDeclaration {
   type: "StructVariableDeclaration";
   name: string;
   structName: string;
+  initializer?: Expression[] | Expression;  // {1, 2} list or another struct var for copy
 }
 
 export type Statement =
@@ -485,6 +486,7 @@ export interface GlobalVariableDeclaration {
 export interface StructFieldDeclaration {
   name: string;
   typeSpec: TypeSpecifier;
+  pointer?: boolean;  // for struct Node *next; fields
 }
 
 export interface StructDeclaration {

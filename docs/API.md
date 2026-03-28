@@ -151,7 +151,7 @@ const wasmBytes = generate(ast);
 
 ---
 
-## Supported C Subset (through Milestone 23)
+## Supported C Subset (through Milestone 24)
 
 ### Types
 - `int` (32-bit signed), `char` (8-bit signed), `short` (16-bit signed), `long` (64-bit signed), `void`
@@ -193,6 +193,11 @@ const wasmBytes = generate(ast);
 - Array of structs: `struct Point pts[3] = {{1, 2}, {3, 4}, {5, 6}};`
 - Nested initializer lists: `{{1, 2}, {3, 4}}`
 - Pointer variables: `int *p = &x;`
+- Nested struct definitions: `struct Outer { struct Inner { int x; } field; };`
+- Struct initializer lists: `struct Point p = {1, 2};`
+- Struct copy by value: `struct Point p2 = p1;`
+- Struct assignment: `p2 = p1;` (deep copy)
+- Chained member access: `line.start.x`, `line.start.y = 5`
 
 ### Expressions
 - Arithmetic: `+`, `-`, `*`, `/`, `%`

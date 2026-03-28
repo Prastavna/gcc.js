@@ -867,4 +867,87 @@ describe("parser", () => {
       expect(call.callee).toBe("fn");
     });
   });
+
+  // ── M23: Multi-dimensional arrays and advanced arrays ──
+  describe("M23: multi-dimensional arrays", () => {
+    it("parses 2D array declaration", () => {
+      const ast = parseSource("int main() { int matrix[3][4]; return 0; }");
+      const func = ast.declarations[0] as any;
+      expect(func.body[0].type).toBe("ArrayDeclaration");
+      expect(func.body[0].dimensions).toEqual([3, 4]);
+      expect(func.body[0].size).toBe(12);
+    });
+
+    it("parses char[] from string literal", () => {
+      const ast = parseSource('int main() { char name[] = "hello"; return 0; }');
+      const func = ast.declarations[0] as any;
+      expect(func.body[0].type).toBe("ArrayDeclaration");
+      expect(func.body[0].stringInit).toBe("hello");
+      expect(func.body[0].dimensions).toEqual([6]); // 5 chars + null
+      expect(func.body[0].size).toBe(6);
+    });
+
+    it("parses chained array access (matrix[i][j])", () => {
+      const ast = parseSource("int main() { int m[2][3]; return m[1][2]; }");
+      const func = ast.declarations[0] as any;
+      const ret = func.body[1] as any;
+      const access = ret.expression;
+      expect(access.type).toBe("ArrayAccessExpression");
+      // outer access: array is inner ArrayAccessExpression, index is 2
+      expect(typeof access.array).toBe("object");
+      expect(access.array.type).toBe("ArrayAccessExpression");
+      expect(access.array.array).toBe("m");
+    });
+
+    it("parses nested initializer lists", () => {
+      const ast = parseSource("int main() { int m[2][2] = {{1, 2}, {3, 4}}; return 0; }");
+      const func = ast.declarations[0] as any;
+      const decl = func.body[0];
+      expect(decl.type).toBe("ArrayDeclaration");
+      expect(decl.initializer.length).toBe(2);
+      expect(Array.isArray(decl.initializer[0])).toBe(true);
+      expect(decl.initializer[0].length).toBe(2);
+    });
+
+    it("parses struct array declaration", () => {
+      const ast = parseSource("struct Point { int x; int y; }; int main() { struct Point pts[3]; return 0; }");
+      const func = ast.declarations[1] as any;
+      expect(func.body[0].type).toBe("ArrayDeclaration");
+      expect(func.body[0].typeSpec).toEqual({ kind: "struct", name: "Point" });
+      expect(func.body[0].dimensions).toEqual([3]);
+    });
+
+    it("parses array access followed by member access (pts[i].x)", () => {
+      const ast = parseSource("struct Point { int x; int y; }; int main() { struct Point pts[3]; return pts[1].x; }");
+      const func = ast.declarations[1] as any;
+      const ret = func.body[1] as any;
+      const memberAccess = ret.expression;
+      expect(memberAccess.type).toBe("MemberAccessExpression");
+      expect(memberAccess.member).toBe("x");
+      expect(typeof memberAccess.object).toBe("object");
+      expect(memberAccess.object.type).toBe("ArrayAccessExpression");
+    });
+
+    it("parses chained array index assignment (matrix[i][j] = val)", () => {
+      const ast = parseSource("int main() { int m[2][2]; m[0][1] = 42; return 0; }");
+      const func = ast.declarations[0] as any;
+      const assign = func.body[1] as any;
+      // ExpressionStatement wrapping ArrayIndexAssignment
+      const expr = assign.expression;
+      expect(expr.type).toBe("ArrayIndexAssignment");
+      expect(typeof expr.array).toBe("object");
+      expect(expr.array.type).toBe("ArrayAccessExpression");
+    });
+
+    it("parses struct array member assignment (pts[i].x = val)", () => {
+      const ast = parseSource("struct Point { int x; int y; }; int main() { struct Point pts[2]; pts[0].x = 10; return 0; }");
+      const func = ast.declarations[1] as any;
+      const assign = func.body[1] as any;
+      const expr = assign.expression;
+      expect(expr.type).toBe("MemberAssignmentExpression");
+      expect(expr.member).toBe("x");
+      expect(typeof expr.object).toBe("object");
+      expect(expr.object.type).toBe("ArrayAccessExpression");
+    });
+  });
 });

@@ -212,20 +212,46 @@ export function parse(tokens: Token[]): Program {
     if (current().type === TokenType.IDENTIFIER) {
       const nextTok = peek(1);
 
-      // Array index assignment: ident[expr] = val
+      // Array index assignment: ident[expr] = val, ident[expr][expr] = val, ident[expr].member = val
       if (nextTok.type === TokenType.LBRACKET) {
         const savedPos = pos;
         const name = current().value;
         pos += 2; // skip ident and [
         const index = parseExpression();
         expect(TokenType.RBRACKET, "']' after array index");
-        if (current().type === TokenType.EQUALS) {
+        // Check for chained [] or . then =
+        let arrayExpr: string | Expression = name;
+        let lastIndex = index;
+        let chained = false;
+        while (current().type === TokenType.LBRACKET) {
+          chained = true;
+          arrayExpr = { type: "ArrayAccessExpression", array: chained ? arrayExpr : name, index: lastIndex } as Expression;
+          pos++; // skip [
+          lastIndex = parseExpression();
+          expect(TokenType.RBRACKET, "']' after array index");
+        }
+        if (!chained) {
+          arrayExpr = name;
+        }
+        // ident[expr].member = val (struct array member assignment)
+        if (current().type === TokenType.DOT) {
+          const arrAccess: Expression = { type: "ArrayAccessExpression", array: chained ? arrayExpr : name, index: lastIndex };
+          pos++; // skip .
+          const member = expect(TokenType.IDENTIFIER, "member name after '.'").value;
+          if (current().type === TokenType.EQUALS) {
+            pos++; // skip =
+            const value = parseAssignment();
+            return { type: "MemberAssignmentExpression", object: arrAccess, member, value };
+          }
+          pos = savedPos;
+        } else if (current().type === TokenType.EQUALS) {
           pos++; // skip =
           const value = parseAssignment();
-          return { type: "ArrayIndexAssignment", array: name, index, value };
+          return { type: "ArrayIndexAssignment", array: chained ? arrayExpr : name, index: lastIndex, value };
+        } else {
+          // Not an assignment — backtrack and let normal expression parsing handle it
+          pos = savedPos;
         }
-        // Not an assignment — backtrack and let normal expression parsing handle it
-        pos = savedPos;
       }
 
       if (nextTok.type === TokenType.EQUALS) {
@@ -484,12 +510,32 @@ export function parse(tokens: Token[]): Program {
 
       const name = tok.value;
       pos++;
-      // Array access: ident[expr]
+      // Array access: ident[expr] with chaining for ident[expr][expr] and ident[expr].member
       if (current().type === TokenType.LBRACKET) {
         pos++; // skip [
         const index = parseExpression();
         expect(TokenType.RBRACKET, "']' after array index");
-        return { type: "ArrayAccessExpression", array: name, index };
+        let result: Expression = { type: "ArrayAccessExpression", array: name, index };
+        // Chain additional [] accesses: matrix[i][j]
+        while (current().type === TokenType.LBRACKET) {
+          pos++; // skip [
+          const nextIndex = parseExpression();
+          expect(TokenType.RBRACKET, "']' after array index");
+          result = { type: "ArrayAccessExpression", array: result, index: nextIndex };
+        }
+        // Chain member access after array: pts[i].x
+        if (current().type === TokenType.DOT) {
+          pos++; // skip .
+          const member = expect(TokenType.IDENTIFIER, "member name after '.'").value;
+          result = { type: "MemberAccessExpression", object: result, member };
+        }
+        // Chain arrow access after array: ptrs[i]->x
+        if (current().type === TokenType.ARROW) {
+          pos++; // skip ->
+          const member = expect(TokenType.IDENTIFIER, "member name after '->'").value;
+          result = { type: "ArrowAccessExpression", pointer: result as any, member };
+        }
+        return result;
       }
       // Member access: ident.member
       if (current().type === TokenType.DOT) {
@@ -693,34 +739,84 @@ export function parse(tokens: Token[]): Program {
       return { type: "VariableDeclaration", name, typeSpec, initializer, pointer: true };
     }
 
-    // Array declaration: int arr[5]; or int arr[3] = {1, 2, 3};
+    // Array declaration: int arr[5]; or int arr[3] = {1, 2, 3}; or int matrix[3][4]; or char name[] = "hello";
     if (
       isTypeSpec() &&
       peek(typeSpecLength()).type === TokenType.IDENTIFIER &&
-      peek(typeSpecLength() + 1).type === TokenType.LBRACKET
+      (peek(typeSpecLength() + 1).type === TokenType.LBRACKET)
     ) {
       const typeSpec = parseTypeSpec();
       const name = expect(TokenType.IDENTIFIER, "array name").value;
+      // Parse dimensions: [N] or [N][M] or [] (empty for inferred size)
+      const dimensions: number[] = [];
+      let inferSize = false;
       expect(TokenType.LBRACKET, "'['");
-      const sizeTok = expect(TokenType.NUMBER, "array size");
-      const size = parseInt(sizeTok.value, 10);
+      if (current().type === TokenType.RBRACKET) {
+        // Empty brackets — size inferred from initializer: char name[] = "hello"
+        inferSize = true;
+        dimensions.push(0); // placeholder
+      } else {
+        const sizeTok = expect(TokenType.NUMBER, "array size");
+        dimensions.push(parseInt(sizeTok.value, 10));
+      }
       expect(TokenType.RBRACKET, "']'");
-      let initializer: Expression[] | undefined;
+      // Additional dimensions: [M], [N], ...
+      while (current().type === TokenType.LBRACKET) {
+        pos++; // skip [
+        const sizeTok = expect(TokenType.NUMBER, "array size");
+        dimensions.push(parseInt(sizeTok.value, 10));
+        expect(TokenType.RBRACKET, "']'");
+      }
+      const totalSize = dimensions.reduce((a, b) => a * b, 1);
+      let initializer: (Expression | Expression[])[] | undefined;
+      let stringInit: string | undefined;
       if (current().type === TokenType.EQUALS) {
         pos++; // skip =
-        expect(TokenType.LBRACE, "'{' for array initializer");
-        initializer = [];
-        if (current().type !== TokenType.RBRACE) {
-          initializer.push(parseAssignment());
-          while (current().type === TokenType.COMMA) {
-            pos++;
-            initializer.push(parseAssignment());
+        // char name[] = "hello" or char name[6] = "hello"
+        if (current().type === TokenType.STRING) {
+          stringInit = current().value;
+          pos++;
+          if (inferSize) {
+            dimensions[0] = stringInit.length + 1; // +1 for null terminator
+          }
+        } else {
+          expect(TokenType.LBRACE, "'{' for array initializer");
+          initializer = [];
+          if (current().type !== TokenType.RBRACE) {
+            if (current().type === TokenType.LBRACE) {
+              // Nested initializer: {{1,2},{3,4}}
+              while (current().type === TokenType.LBRACE) {
+                pos++; // skip inner {
+                const inner: Expression[] = [];
+                if (current().type !== TokenType.RBRACE) {
+                  inner.push(parseAssignment());
+                  while (current().type === TokenType.COMMA) {
+                    pos++;
+                    inner.push(parseAssignment());
+                  }
+                }
+                expect(TokenType.RBRACE, "'}' after nested initializer");
+                initializer.push(inner);
+                if (current().type === TokenType.COMMA) pos++;
+              }
+            } else {
+              // Flat initializer: {1, 2, 3}
+              initializer.push(parseAssignment());
+              while (current().type === TokenType.COMMA) {
+                pos++;
+                initializer.push(parseAssignment());
+              }
+            }
+          }
+          expect(TokenType.RBRACE, "'}' after array initializer");
+          if (inferSize && initializer) {
+            dimensions[0] = initializer.length;
           }
         }
-        expect(TokenType.RBRACE, "'}' after array initializer");
       }
+      const size = dimensions.reduce((a, b) => a * b, 1);
       expect(TokenType.SEMICOLON, "';' after array declaration");
-      return { type: "ArrayDeclaration", name, typeSpec, size, initializer };
+      return { type: "ArrayDeclaration", name, typeSpec, size, dimensions, initializer, stringInit };
     }
 
     // Variable declaration: int x = expr;

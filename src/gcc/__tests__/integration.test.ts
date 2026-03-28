@@ -3406,4 +3406,182 @@ describe("integration: compile() end-to-end", () => {
       expect((instance.exports.main as () => number)()).toBe(30);
     });
   });
+
+  // ── Milestone 23: Multi-dimensional arrays and advanced arrays ──
+  describe("M23: multi-dimensional arrays and advanced arrays", () => {
+    it("multi-dimensional array write and read", async () => {
+      const source = `
+        int main() {
+            int matrix[3][4];
+            matrix[0][0] = 10;
+            matrix[1][2] = 42;
+            matrix[2][3] = 99;
+            return matrix[0][0] + matrix[1][2] + matrix[2][3];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(151);
+    });
+
+    it("2D array with nested loop fill", async () => {
+      const source = `
+        int main() {
+            int matrix[3][4];
+            for (int i = 0; i < 3; i = i + 1) {
+                for (int j = 0; j < 4; j = j + 1) {
+                    matrix[i][j] = i * 4 + j;
+                }
+            }
+            return matrix[2][3];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(11);
+    });
+
+    it("2D array with nested initializer", async () => {
+      const source = `
+        int main() {
+            int m[2][3] = {{1, 2, 3}, {4, 5, 6}};
+            return m[0][0] + m[0][2] + m[1][1] + m[1][2];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 1 + 3 + 5 + 6 = 15
+      expect((instance.exports.main as () => number)()).toBe(15);
+    });
+
+    it("char array from string literal", async () => {
+      const source = `
+        int main() {
+            char name[] = "hello";
+            return name[0];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 'h' = 104
+      expect((instance.exports.main as () => number)()).toBe(104);
+    });
+
+    it("char array reads multiple characters", async () => {
+      const source = `
+        int main() {
+            char s[] = "ABC";
+            return s[0] + s[1] + s[2];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 'A'=65 + 'B'=66 + 'C'=67 = 198
+      expect((instance.exports.main as () => number)()).toBe(198);
+    });
+
+    it("char array null terminator", async () => {
+      const source = `
+        int main() {
+            char s[] = "hi";
+            return s[2];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(0);
+    });
+
+    it("array of structs with nested initializer", async () => {
+      const source = `
+        struct Point { int x; int y; };
+
+        int main() {
+            struct Point pts[3] = {{1, 2}, {3, 4}, {5, 6}};
+            return pts[0].x + pts[1].x + pts[2].y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 1 + 3 + 6 = 10
+      expect((instance.exports.main as () => number)()).toBe(10);
+    });
+
+    it("array of structs write and read", async () => {
+      const source = `
+        struct Point { int x; int y; };
+
+        int main() {
+            struct Point pts[2];
+            pts[0].x = 10;
+            pts[0].y = 20;
+            pts[1].x = 30;
+            pts[1].y = 40;
+            return pts[0].x + pts[1].y;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(50);
+    });
+
+    it("row access on 2D array decays to pointer", async () => {
+      const source = `
+        int main() {
+            int matrix[3][4];
+            for (int i = 0; i < 3; i = i + 1) {
+                for (int j = 0; j < 4; j = j + 1) {
+                    matrix[i][j] = i * 4 + j;
+                }
+            }
+            int *p = matrix[1];
+            return p[0] + p[3];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // matrix[1][0]=4, matrix[1][3]=7 → 11
+      expect((instance.exports.main as () => number)()).toBe(11);
+    });
+
+    it("full milestone 23 target program", async () => {
+      const source = `
+        struct Point { int x; int y; };
+
+        int main() {
+            int matrix[3][4];
+            for (int i = 0; i < 3; i = i + 1) {
+                for (int j = 0; j < 4; j = j + 1) {
+                    matrix[i][j] = i * 4 + j;
+                }
+            }
+
+            char name[] = "hello";
+
+            struct Point pts[3] = {{1, 2}, {3, 4}, {5, 6}};
+
+            int *p = matrix[1];
+            return matrix[2][3] + name[0] + pts[1].x;
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // matrix[2][3]=11, name[0]='h'=104, pts[1].x=3 → 118
+      expect((instance.exports.main as () => number)()).toBe(118);
+    });
+
+    it("char array with explicit size", async () => {
+      const source = `
+        int main() {
+            char s[6] = "hello";
+            return s[4];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      // 'o' = 111
+      expect((instance.exports.main as () => number)()).toBe(111);
+    });
+
+    it("array decay to pointer in assignment", async () => {
+      const source = `
+        int main() {
+            int arr[5] = {10, 20, 30, 40, 50};
+            int *p = arr;
+            return p[2];
+        }
+      `;
+      const instance = await compileAndInstantiate(source);
+      expect((instance.exports.main as () => number)()).toBe(30);
+    });
+  });
 });

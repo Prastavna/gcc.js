@@ -151,7 +151,7 @@ const wasmBytes = generate(ast);
 
 ---
 
-## Supported C Subset (through Milestone 22)
+## Supported C Subset (through Milestone 23)
 
 ### Types
 - `int` (32-bit signed), `char` (8-bit signed), `short` (16-bit signed), `long` (64-bit signed), `void`
@@ -188,7 +188,10 @@ const wasmBytes = generate(ast);
 - `typedef` for function pointers: `typedef int (*BinOp)(int, int);`
 - Local variables: `int x = 10;`, `char c = 'A';`, `long big = 100000;`, `float f = 3.14f;`, `double d = 2.718;`
 - Global variables: `int counter = 0;`
-- Arrays: `int arr[5] = {1, 2, 3, 4, 5};`
+- Arrays: `int arr[5] = {1, 2, 3, 4, 5};`, multi-dimensional: `int m[3][4];`
+- `char[]` from string literal: `char name[] = "hello";`
+- Array of structs: `struct Point pts[3] = {{1, 2}, {3, 4}, {5, 6}};`
+- Nested initializer lists: `{{1, 2}, {3, 4}}`
 - Pointer variables: `int *p = &x;`
 
 ### Expressions
@@ -200,7 +203,7 @@ const wasmBytes = generate(ast);
 - Assignment: `x = val`, `x += val`, `x -= val`, etc.
 - Increment/decrement: `++x`, `x++`, `--x`, `x--`
 - Pointers: `&x`, `*p`, `*p = val`
-- Arrays: `arr[i]`, `arr[i] = val`
+- Arrays: `arr[i]`, `arr[i] = val`, `matrix[i][j]`, `pts[i].x`
 - Function calls: `add(3, 4)`, `fp(3, 4)` (indirect via function pointer)
 - Comma operator: `(a, b, c)` — evaluates all, returns last
 

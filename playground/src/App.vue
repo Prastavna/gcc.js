@@ -145,7 +145,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
     <!-- Bottom status bar -->
     <div class="flex items-center justify-between border-t border-[var(--color-border)] bg-zinc-900 px-4 py-1">
-      <span class="text-[10px] text-zinc-600">gcc.js v0.0.0 | Milestone 22</span>
+      <span class="text-[10px] text-zinc-600">gcc.js v0.0.0 | Milestone 23</span>
       <span class="text-[10px] text-zinc-600">{{ code.split('\n').length }} lines</span>
     </div>
   </div>

@@ -239,17 +239,17 @@ export interface CompoundAssignmentExpression {
   value: Expression;
 }
 
-/** arr[i] — reads an array element */
+/** arr[i] — reads an array element (array can be a name or a sub-expression for chained access like matrix[i][j]) */
 export interface ArrayAccessExpression {
   type: "ArrayAccessExpression";
-  array: string;
+  array: string | Expression;
   index: Expression;
 }
 
 /** arr[i] = val — writes an array element */
 export interface ArrayIndexAssignment {
   type: "ArrayIndexAssignment";
-  array: string;
+  array: string | Expression;
   index: Expression;
   value: Expression;
 }
@@ -273,17 +273,17 @@ export interface SizeofExpression {
   targetType: TypeSpecifier;
 }
 
-/** p.x — reads a struct field */
+/** p.x — reads a struct field (object can be a name or expression like pts[i].x) */
 export interface MemberAccessExpression {
   type: "MemberAccessExpression";
-  object: string;
+  object: string | Expression;
   member: string;
 }
 
 /** p.x = val — writes a struct field */
 export interface MemberAssignmentExpression {
   type: "MemberAssignmentExpression";
-  object: string;
+  object: string | Expression;
   member: string;
   value: Expression;
 }
@@ -380,7 +380,9 @@ export interface ArrayDeclaration {
   name: string;
   typeSpec: TypeSpecifier;
   size: number;
-  initializer?: Expression[];
+  dimensions: number[];          // [5] for int[5], [3,4] for int[3][4]
+  initializer?: (Expression | Expression[])[];  // nested lists for 2D arrays
+  stringInit?: string;           // char name[] = "hello"
 }
 
 export interface BreakStatement {

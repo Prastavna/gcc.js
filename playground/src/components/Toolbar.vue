@@ -171,6 +171,18 @@ const examples: { label: string; code: string }[] = [
     label: 'Function pointers',
     code: `int add(int a, int b) { return a + b; }\nint mul(int a, int b) { return a * b; }\n\nint apply(int (*op)(int, int), int x, int y) {\n    return op(x, y);\n}\n\nint main() {\n    int (*fn)(int, int) = add;\n    int result = apply(fn, 3, 4);\n    fn = mul;\n    return result + fn(5, 6);\n}`,
   },
+  {
+    label: '2D array',
+    code: `int main() {\n    int matrix[3][4];\n    for (int i = 0; i < 3; i = i + 1) {\n        for (int j = 0; j < 4; j = j + 1) {\n            matrix[i][j] = i * 4 + j;\n        }\n    }\n    return matrix[2][3];\n}`,
+  },
+  {
+    label: 'Char array',
+    code: `int main() {\n    char name[] = "hello";\n    int sum = 0;\n    for (int i = 0; i < 5; i = i + 1) {\n        sum = sum + name[i];\n    }\n    return sum;\n}`,
+  },
+  {
+    label: 'Array of structs',
+    code: `struct Point { int x; int y; };\n\nint main() {\n    struct Point pts[3] = {{1, 2}, {3, 4}, {5, 6}};\n    int sum = 0;\n    for (int i = 0; i < 3; i = i + 1) {\n        sum = sum + pts[i].x + pts[i].y;\n    }\n    return sum;\n}`,
+  },
 ]
 
 const showDropdown = ref(false)

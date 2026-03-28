@@ -476,7 +476,7 @@ int main() {
 - [x] WASM `call_indirect` and table section for indirect calls
 - [x] `typedef` for function pointer types
 
-### Milestone 23: Multi-dimensional arrays and advanced arrays
+### Milestone 23: Multi-dimensional arrays and advanced arrays [DONE]
 ```c
 int main() {
     int matrix[3][4];
@@ -495,13 +495,12 @@ int main() {
     return matrix[2][3] + name[0] + pts[1].x;
 }
 ```
-- [ ] Multi-dimensional arrays (`int a[3][4]`)
-- [ ] Array of structs (`struct Point pts[10]`)
-- [ ] `char[]` initialized from string literal (`char s[] = "hello"`)
-- [ ] Array decay to pointer (`int *p = arr`)
-- [ ] Pointer arithmetic (`p + n`, `p - n`, `p1 - p2`)
-- [ ] Row access on 2D arrays (`matrix[i]` decays to `int *`)
-- [ ] Nested initializer lists (`{{1, 2}, {3, 4}}`)
+- [x] Multi-dimensional arrays (`int a[3][4]`)
+- [x] Array of structs (`struct Point pts[10]`)
+- [x] `char[]` initialized from string literal (`char s[] = "hello"`)
+- [x] Array decay to pointer (`int *p = arr`)
+- [x] Row access on 2D arrays (`matrix[i]` decays to `int *`)
+- [x] Nested initializer lists (`{{1, 2}, {3, 4}}`)
 
 ### Milestone 24: Struct and union enhancements
 ```c

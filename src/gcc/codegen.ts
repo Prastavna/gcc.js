@@ -792,7 +792,7 @@ type Ctx = {
   localTypes: Map<string, CType>;
   memVars: Map<string, number>;
   memVarTypes: Map<string, CType>;
-  arrayVars: Map<string, { addr: number; size: number }>;
+  arrayVars: Map<string, { addr: number; size: number; elemSize: number; dimensions: number[]; elemType: CType; structName?: string }>;
   structVars: Map<string, { addr: number; structName: string }>;
   structParamVars: Map<string, { localIdx: number; structName: string }>;
   funcIndex: Map<string, number>;
@@ -974,13 +974,26 @@ function buildFunctionBody(
   }
 
   // Allocate arrays in linear memory
-  const arrayVars = new Map<string, { addr: number; size: number }>();
+  const arrayVars = new Map<string, { addr: number; size: number; elemSize: number; dimensions: number[]; elemType: CType; structName?: string }>();
   function collectArrayDecls(stmts: Statement[]): void {
     for (const s of stmts) {
       if (s.type === "ArrayDeclaration" && !arrayVars.has(s.name)) {
+        const elemType = typeSpecToCType(s.typeSpec);
+        const isStructArray = typeof s.typeSpec === "object" && "kind" in s.typeSpec && s.typeSpec.kind === "struct";
+        const structName = isStructArray ? (s.typeSpec as { kind: "struct"; name: string }).name : undefined;
+        let elemSize: number;
+        if (structName) {
+          const def = structDefs.get(structName);
+          if (!def) throw new Error(`Unknown struct type '${structName}'`);
+          elemSize = def.size;
+        } else {
+          elemSize = sizeOfType(elemType);
+        }
+        const dimensions = s.dimensions || [s.size];
+        const totalSize = dimensions.reduce((a, b) => a * b, 1);
         const addr = nextMemAddr;
-        nextMemAddr += s.size * 4;
-        arrayVars.set(s.name, { addr, size: s.size });
+        nextMemAddr += totalSize * elemSize;
+        arrayVars.set(s.name, { addr, size: totalSize, elemSize, dimensions, elemType, structName });
       }
       if (s.type === "IfStatement") { collectArrayDecls(s.consequent); if (s.alternate) collectArrayDecls(s.alternate); }
       if (s.type === "WhileStatement") collectArrayDecls(s.body);
@@ -1313,16 +1326,53 @@ function emitStatement(out: number[], stmt: Statement, ctx: Ctx): void {
     case "StructVariableDeclaration":
       // Memory is pre-allocated; nothing to emit
       break;
-    case "ArrayDeclaration":
-      if (stmt.initializer) {
-        const arrInfo = ctx.arrayVars.get(stmt.name)!;
-        for (let i = 0; i < stmt.initializer.length; i++) {
-          out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr + i * 4));
-          emitExpression(out, stmt.initializer[i], ctx);
-          out.push(Op.I32_STORE, 0x02, 0x00);
+    case "ArrayDeclaration": {
+      const arrInfo = ctx.arrayVars.get(stmt.name)!;
+      if (stmt.stringInit) {
+        // char name[] = "hello" — copy bytes one at a time
+        const str = stmt.stringInit;
+        for (let i = 0; i < str.length; i++) {
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr + i));
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(str.charCodeAt(i)));
+          out.push(Op.I32_STORE8, 0x00, 0x00);
+        }
+        // null terminator
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr + str.length));
+        out.push(Op.I32_CONST, 0x00);
+        out.push(Op.I32_STORE8, 0x00, 0x00);
+      } else if (stmt.initializer) {
+        // Flatten nested initializers: [[a,b],[c,d]] → [a,b,c,d]
+        const flat: Expression[] = [];
+        for (const item of stmt.initializer) {
+          if (Array.isArray(item)) {
+            flat.push(...item);
+          } else {
+            flat.push(item);
+          }
+        }
+        if (arrInfo.structName) {
+          // Array of structs: write each field
+          const def = structDefs.get(arrInfo.structName)!;
+          const fieldsPerStruct = def.fields.length;
+          for (let i = 0; i < flat.length; i++) {
+            const structIdx = Math.floor(i / fieldsPerStruct);
+            const fieldIdx = i % fieldsPerStruct;
+            const field = def.fields[fieldIdx];
+            const addr = arrInfo.addr + structIdx * def.size + field.offset;
+            out.push(Op.I32_CONST, ...encodeSignedLEB128(addr));
+            emitExpression(out, flat[i], ctx);
+            emitMemStore(out, field.ctype);
+          }
+        } else {
+          for (let i = 0; i < flat.length; i++) {
+            out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr + i * arrInfo.elemSize));
+            emitExpression(out, flat[i], ctx);
+            emitMemStore(out, arrInfo.elemType);
+          }
         }
       }
       break;
+    }
     case "ExpressionStatement": {
       emitExpression(out, stmt.expression, ctx);
       if (exprProducesValue(stmt.expression)) {
@@ -1639,6 +1689,18 @@ function emitMemStore(out: number[], ctype: CType): void {
 }
 
 // ── Struct field resolution ──────────────────────────────
+
+/** Resolve the struct name from an expression (e.g., ArrayAccessExpression on a struct array) */
+function resolveExprStructName(expr: Expression, ctx: Ctx): string {
+  if (expr.type === "ArrayAccessExpression" && typeof expr.array === "string") {
+    const arrInfo = ctx.arrayVars.get(expr.array);
+    if (arrInfo?.structName) return arrInfo.structName;
+    // Check if it's a pointer-to-struct variable
+    const sn = ctx.varStructPtrTypes.get(expr.array);
+    if (sn) return sn;
+  }
+  throw new Error("Cannot resolve struct type from expression");
+}
 
 function resolveStructField(objectName: string, memberName: string, ctx: Ctx): { addr: number | null; fieldInfo: StructFieldInfo } {
   let structName: string;
@@ -2102,14 +2164,58 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       return resultType;
     }
     case "ArrayAccessExpression": {
-      const arrInfo = ctx.arrayVars.get(expr.array);
-      // Determine element type: pointer vars use their pointed-to type, arrays default to int
-      const elemType: CType = ctx.varPtrTypes.get(expr.array) || "int";
-      const elemSize = sizeOfType(elemType);
-      if (arrInfo) {
+      const arrayName = typeof expr.array === "string" ? expr.array : null;
+      const arrInfo = arrayName ? ctx.arrayVars.get(arrayName) : null;
+
+      if (arrInfo && arrInfo.dimensions.length > 1) {
+        // Multi-dimensional array: matrix[i] on a 2D array returns a row pointer
+        // Row stride = product of remaining dimensions * elemSize
+        const innerSize = arrInfo.dimensions.slice(1).reduce((a, b) => a * b, 1) * arrInfo.elemSize;
         out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr));
+        emitExpression(out, expr.index, ctx);
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(innerSize));
+        out.push(Op.I32_MUL);
+        out.push(Op.I32_ADD);
+        // Returns a pointer (address) — caller will index into it or use it as pointer
+        return "int";
+      }
+
+      if (arrInfo && arrInfo.structName) {
+        // Array of structs: pts[i] returns the address of the i-th struct
+        const def = structDefs.get(arrInfo.structName)!;
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr));
+        emitExpression(out, expr.index, ctx);
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(def.size));
+        out.push(Op.I32_MUL);
+        out.push(Op.I32_ADD);
+        // Returns an address — member access will add field offset and load
+        return "int";
+      }
+
+      // Simple 1D array or pointer-based access or chained access (expr[j])
+      let elemType: CType;
+      let elemSize: number;
+      if (arrInfo) {
+        elemType = arrInfo.elemType;
+        elemSize = arrInfo.elemSize;
+        out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr));
+      } else if (arrayName) {
+        elemType = ctx.varPtrTypes.get(arrayName) || "int";
+        elemSize = sizeOfType(elemType);
+        emitVarGet(out, arrayName, ctx);
       } else {
-        emitVarGet(out, expr.array, ctx);
+        // Chained access: expr.array is an Expression (e.g., matrix[i][j] — inner returns addr)
+        elemType = "int";
+        elemSize = sizeOfType(elemType);
+        // Check if inner expression is an array access on a multi-dim array to get proper element type
+        if (expr.array.type === "ArrayAccessExpression" && typeof expr.array.array === "string") {
+          const innerArrInfo = ctx.arrayVars.get(expr.array.array);
+          if (innerArrInfo) {
+            elemType = innerArrInfo.elemType;
+            elemSize = innerArrInfo.elemSize;
+          }
+        }
+        emitExpression(out, expr.array, ctx);
       }
       emitExpression(out, expr.index, ctx);
       out.push(Op.I32_CONST, ...encodeSignedLEB128(elemSize));
@@ -2119,13 +2225,32 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       return elemType;
     }
     case "ArrayIndexAssignment": {
-      const arrInfo = ctx.arrayVars.get(expr.array);
-      const elemType: CType = ctx.varPtrTypes.get(expr.array) || "int";
-      const elemSize = sizeOfType(elemType);
+      const arrayName = typeof expr.array === "string" ? expr.array : null;
+      const arrInfo = arrayName ? ctx.arrayVars.get(arrayName) : null;
+
+      let elemType: CType;
+      let elemSize: number;
+
       if (arrInfo) {
+        elemType = arrInfo.elemType;
+        elemSize = arrInfo.elemSize;
         out.push(Op.I32_CONST, ...encodeSignedLEB128(arrInfo.addr));
+      } else if (arrayName) {
+        elemType = ctx.varPtrTypes.get(arrayName) || "int";
+        elemSize = sizeOfType(elemType);
+        emitVarGet(out, arrayName, ctx);
       } else {
-        emitVarGet(out, expr.array, ctx);
+        // Chained: e.g. matrix[i][j] = val — inner expression is an address
+        elemType = "int";
+        elemSize = sizeOfType(elemType);
+        if (expr.array.type === "ArrayAccessExpression" && typeof expr.array.array === "string") {
+          const innerArrInfo = ctx.arrayVars.get(expr.array.array);
+          if (innerArrInfo) {
+            elemType = innerArrInfo.elemType;
+            elemSize = innerArrInfo.elemSize;
+          }
+        }
+        emitExpression(out, expr.array, ctx);
       }
       emitExpression(out, expr.index, ctx);
       out.push(Op.I32_CONST, ...encodeSignedLEB128(elemSize));
@@ -2211,6 +2336,21 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       return varType;
     }
     case "MemberAccessExpression": {
+      if (typeof expr.object !== "string") {
+        // Expression-based member access: e.g. pts[i].x — object is an address
+        const structName = resolveExprStructName(expr.object, ctx);
+        const def = structDefs.get(structName);
+        if (!def) throw new Error(`Unknown struct type '${structName}'`);
+        const fieldInfo = def.fields.find(f => f.name === expr.member);
+        if (!fieldInfo) throw new Error(`Struct '${structName}' has no field '${expr.member}'`);
+        emitExpression(out, expr.object, ctx);
+        if (fieldInfo.offset > 0) {
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(fieldInfo.offset));
+          out.push(Op.I32_ADD);
+        }
+        emitMemLoad(out, fieldInfo.ctype);
+        return fieldInfo.ctype;
+      }
       const { addr, fieldInfo } = resolveStructField(expr.object, expr.member, ctx);
       if (addr !== null) {
         // Stack-allocated struct var
@@ -2228,6 +2368,23 @@ function emitExpression(out: number[], expr: Expression, ctx: Ctx): CType {
       return fieldInfo.ctype;
     }
     case "MemberAssignmentExpression": {
+      if (typeof expr.object !== "string") {
+        // Expression-based member assignment: e.g. pts[i].x = val
+        const structName = resolveExprStructName(expr.object, ctx);
+        const def = structDefs.get(structName);
+        if (!def) throw new Error(`Unknown struct type '${structName}'`);
+        const fieldInfo = def.fields.find(f => f.name === expr.member);
+        if (!fieldInfo) throw new Error(`Struct '${structName}' has no field '${expr.member}'`);
+        emitExpression(out, expr.object, ctx);
+        if (fieldInfo.offset > 0) {
+          out.push(Op.I32_CONST, ...encodeSignedLEB128(fieldInfo.offset));
+          out.push(Op.I32_ADD);
+        }
+        const valType = emitExpression(out, expr.value, ctx);
+        emitConversion(out, valType, fieldInfo.ctype);
+        emitMemStore(out, fieldInfo.ctype);
+        return "void";
+      }
       const { addr, fieldInfo } = resolveStructField(expr.object, expr.member, ctx);
       if (addr !== null) {
         out.push(Op.I32_CONST, ...encodeSignedLEB128(addr + fieldInfo.offset));

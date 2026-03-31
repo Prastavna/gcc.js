@@ -12,6 +12,10 @@ const emit = defineEmits<{
 
 const examples: { label: string; code: string }[] = [
   {
+    label: 'Hello World',
+    code: `int printf(int ptr);\n\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}`,
+  },
+  {
     label: 'Return 42',
     code: `int main() {\n    return 42;\n}`,
   },
@@ -70,10 +74,6 @@ const examples: { label: string; code: string }[] = [
   {
     label: 'Swap (pointers)',
     code: `void swap(int *a, int *b) {\n    int tmp = *a;\n    *a = *b;\n    *b = tmp;\n}\n\nint main() {\n    int x = 1;\n    int y = 2;\n    swap(&x, &y);\n    return x * 10 + y;\n}`,
-  },
-  {
-    label: 'Hello World',
-    code: `int printf(int ptr);\n\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}`,
   },
   {
     label: 'Arrays',
@@ -240,16 +240,18 @@ import { ref } from 'vue'
         </button>
         <div
           v-if="showDropdown"
-          class="absolute right-0 top-full z-10 mt-1 min-w-[160px] rounded border border-[var(--color-border)] bg-zinc-800 py-1 shadow-xl"
+          class="absolute right-0 top-full z-10 mt-1 w-[36rem] max-w-[calc(100vw-2rem)] rounded border border-[var(--color-border)] bg-zinc-800 p-2 shadow-xl"
         >
+          <div class="grid grid-cols-3 gap-1">
           <button
             v-for="ex in examples"
             :key="ex.label"
-            class="block w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer"
+            class="w-full rounded px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-700 cursor-pointer"
             @click="selectExample(ex.code)"
           >
             {{ ex.label }}
           </button>
+          </div>
         </div>
       </div>
 

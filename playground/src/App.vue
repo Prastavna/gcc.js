@@ -6,7 +6,7 @@ import type { OutputEntry } from './components/OutputPanel.vue'
 import Toolbar from './components/Toolbar.vue'
 import { compile } from 'gcc.js'
 
-const DEFAULT_CODE = `int main() {\n    return 42;\n}`
+const DEFAULT_CODE = `int printf(int ptr);\n\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}`
 
 const code = ref(DEFAULT_CODE)
 const output = ref<OutputEntry[]>([])

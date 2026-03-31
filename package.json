@@ -1,5 +1,5 @@
 {
-  "name": "gcc.js",
+  "name": "@prastavna/gcc.js",
   "version": "0.1.0",
   "description": "A client-side C-to-WebAssembly compiler written in pure TypeScript",
   "type": "module",

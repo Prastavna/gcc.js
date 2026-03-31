@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM"],
+    "outDir": "dist",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/gcc/index.ts",
+    "src/gcc/preprocessor.ts",
+    "src/gcc/lexer.ts",
+    "src/gcc/parser.ts",
+    "src/gcc/codegen.ts",
+    "src/gcc/wasm.ts",
+    "src/gcc/types.ts",
+    "src/cli.ts"
+  ]
+}

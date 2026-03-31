@@ -1,16 +1,52 @@
 {
   "name": "gcc.js",
-  "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "A client-side C-to-WebAssembly compiler written in pure TypeScript",
   "type": "module",
+  "main": "dist/gcc/index.js",
+  "types": "dist/gcc/index.d.ts",
+  "bin": {
+    "gcc.js": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/gcc/index.js",
+      "types": "./dist/gcc/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc -p tsconfig.build.json",
+    "build:playground": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "bun run build"
   },
+  "keywords": [
+    "c",
+    "compiler",
+    "wasm",
+    "webassembly",
+    "c89",
+    "parser",
+    "lexer",
+    "codegen"
+  ],
+  "author": "Prastavna",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nicosh/gcc.js.git"
+  },
+  "homepage": "https://github.com/nicosh/gcc.js",
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "typescript": "~5.9.3",
     "vite": "^8.0.0",
     "vitest": "^4.1.0"

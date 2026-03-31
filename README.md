@@ -8,13 +8,34 @@ A client-side C-to-WebAssembly compiler written in pure TypeScript. Compiles a s
 - **Client-side compilation** - runs entirely in the browser or JS runtime
 - **Small footprint** - generated compiler bundles to under 50KB
 - **Full pipeline** - preprocessor, lexer, parser, and codegen in one package
-- **625 passing tests** across 6 test suites
+- **635 passing tests** across 7 test suites
+- **CLI support** - compile C files with `npx gcc.js code.c`
 - **Interactive playground** - Vue 3 web app for live compilation
+
+## Installation
+
+```bash
+npm install gcc.js
+```
+
+## CLI Usage
+
+Compile C files to WebAssembly from the command line:
+
+```bash
+# Install globally
+npm install -g gcc.js
+
+# Or use directly with npx
+npx gcc.js code.c                  # Outputs code.wasm
+npx gcc.js code.c -o out.wasm      # Custom output file
+npx gcc.js code.c -DDEBUG=1        # With preprocessor macros
+```
 
 ## Quick Start
 
 ```ts
-import { compile } from "./gcc";
+import { compile } from "gcc.js";
 
 const result = compile(`
   int square(int x) { return x * x; }
@@ -174,10 +195,11 @@ interface CompileError {
 For advanced usage, individual pipeline stages are exported:
 
 ```ts
-import { preprocess } from "./gcc/preprocessor";  // source → preprocessed source
-import { tokenize } from "./gcc/lexer";            // source → Token[]
-import { parse } from "./gcc/parser";              // Token[] → AST
-import { generate } from "./gcc/codegen";          // AST → Uint8Array
+import { preprocess, tokenize, parse, generate } from "gcc.js";
+// preprocess: source → preprocessed source
+// tokenize:   source → Token[]
+// parse:      Token[] → AST
+// generate:   AST → Uint8Array
 ```
 
 ## Compiler Pipeline
@@ -240,15 +262,19 @@ Features:
 
 ```
 gcc.js/
-├── src/gcc/
-│   ├── index.ts            # Main compile() API
-│   ├── preprocessor.ts     # C preprocessor
-│   ├── lexer.ts            # Tokenizer
-│   ├── parser.ts           # Recursive descent parser
-│   ├── codegen.ts          # WASM binary code generator
-│   ├── wasm.ts             # WASM binary format helpers (LEB128)
-│   ├── types.ts            # Token types, AST nodes, CType enum
-│   └── __tests__/          # 625 tests across 6 files
+├── src/
+│   ├── cli.ts              # CLI entry point (npx gcc.js)
+│   ├── gcc/
+│   │   ├── index.ts        # Main compile() API
+│   │   ├── preprocessor.ts # C preprocessor
+│   │   ├── lexer.ts        # Tokenizer
+│   │   ├── parser.ts       # Recursive descent parser
+│   │   ├── codegen.ts      # WASM binary code generator
+│   │   ├── wasm.ts         # WASM binary format helpers (LEB128)
+│   │   ├── types.ts        # Token types, AST nodes, CType enum
+│   │   └── __tests__/      # 625 tests across 6 files
+│   └── __tests__/
+│       └── cli.test.ts     # CLI tests
 ├── playground/             # Vue 3 interactive web app
 ├── docs/
 │   ├── PLAN.md             # Development roadmap

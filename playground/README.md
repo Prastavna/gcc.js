@@ -1,6 +1,6 @@
-# gcc.js Playground
+# @prastavna/gcc.js Playground
 
-Interactive browser-based playground for the gcc.js C-to-WebAssembly compiler.
+Interactive browser-based playground for the @prastavna/gcc.js C-to-WebAssembly compiler.
 
 Write C code on the left, hit Compile, see WASM output on the right.
 
@@ -18,7 +18,7 @@ Opens at `http://localhost:5173`.
 
 1. You write C code in the editor panel
 2. Click **Compile** (or press **Ctrl+Enter**)
-3. The playground calls `compile()` from `gcc.js` (imported via Vite alias from `../src/gcc`)
+3. The playground calls `compile()` from `@prastavna/gcc.js` (imported via Vite alias from `../src/gcc`)
 4. The resulting WASM binary is instantiated via `WebAssembly.compile()` + `WebAssembly.instantiate()`
 5. All exported functions are called and their return values are displayed in the output panel
 
@@ -28,7 +28,7 @@ Everything runs client-side. No server involved.
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  Toolbar: [gcc.js playground]  [Examples] [Compile] │
+│  Toolbar: [@prastavna/gcc.js playground]  [Examples] [Compile] │
 ├────────────────────┬────────────────────────────┤
 │                    │                            │
 │   Code Editor      │   Output Panel             │
@@ -64,12 +64,12 @@ Everything runs client-side. No server involved.
 
 ## Vite config
 
-The `gcc.js` alias in `vite.config.ts` points to `../src/gcc`, so the playground always uses the local compiler source directly. No build step or npm link needed.
+The `@prastavna/gcc.js` alias in `vite.config.ts` points to `../src/gcc`, so the playground always uses the local compiler source directly. No build step or npm link needed.
 
 ```ts
 resolve: {
   alias: {
-    'gcc.js': resolve(__dirname, '../src/gcc'),
+    '@prastavna/gcc.js': resolve(__dirname, '../src/gcc'),
   },
 },
 ```

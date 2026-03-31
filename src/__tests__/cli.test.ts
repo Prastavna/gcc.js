@@ -38,13 +38,13 @@ describe("CLI", () => {
   it("shows help with --help", () => {
     const { stdout, exitCode } = run("--help");
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Usage: gcc.js");
+    expect(stdout).toContain("Usage: @prastavna/gcc.js");
   });
 
   it("shows help with -h", () => {
     const { stdout, exitCode } = run("-h");
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Usage: gcc.js");
+    expect(stdout).toContain("Usage: @prastavna/gcc.js");
   });
 
   it("shows version with --version", () => {
@@ -99,7 +99,7 @@ describe("CLI", () => {
   it("errors on no arguments", () => {
     const { stdout, exitCode } = run();
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("Usage: gcc.js");
+    expect(stdout).toContain("Usage: @prastavna/gcc.js");
   });
 
   it("errors on unknown option", () => {

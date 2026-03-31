@@ -4,7 +4,7 @@ import CodeEditor from './components/CodeEditor.vue'
 import OutputPanel from './components/OutputPanel.vue'
 import type { OutputEntry } from './components/OutputPanel.vue'
 import Toolbar from './components/Toolbar.vue'
-import { compile } from 'gcc.js'
+import { compile } from '@prastavna/gcc.js'
 
 const DEFAULT_CODE = `int printf(int ptr);\n\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}`
 
@@ -145,7 +145,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 
     <!-- Bottom status bar -->
     <div class="flex items-center justify-between border-t border-[var(--color-border)] bg-zinc-900 px-4 py-1">
-      <span class="text-[10px] text-zinc-600">gcc.js v0.0.0 | Milestone 26</span>
+      <span class="text-[10px] text-zinc-600">@prastavna/gcc.js v0.0.0 | Milestone 26</span>
       <span class="text-[10px] text-zinc-600">{{ code.split('\n').length }} lines</span>
     </div>
   </div>

@@ -9,13 +9,13 @@ A client-side C-to-WebAssembly compiler written in pure TypeScript. Compiles a s
 - **Small footprint** - generated compiler bundles to under 50KB
 - **Full pipeline** - preprocessor, lexer, parser, and codegen in one package
 - **635 passing tests** across 7 test suites
-- **CLI support** - compile C files with `npx gcc.js code.c`
+- **CLI support** - compile C files with `npx @prastavna/gcc.js code.c`
 - **Interactive playground** - Vue 3 web app for live compilation
 
 ## Installation
 
 ```bash
-npm install gcc.js
+npm install @prastavna/gcc.js
 ```
 
 ## CLI Usage
@@ -24,12 +24,12 @@ Compile C files to WebAssembly from the command line:
 
 ```bash
 # Install globally
-npm install -g gcc.js
+npm install -g @prastavna/gcc.js
 
 # Or use directly with npx
-npx gcc.js code.c                  # Outputs code.wasm
-npx gcc.js code.c -o out.wasm      # Custom output file
-npx gcc.js code.c -DDEBUG=1        # With preprocessor macros
+npx @prastavna/gcc.js code.c                  # Outputs code.wasm
+npx @prastavna/gcc.js code.c -o out.wasm      # Custom output file
+npx @prastavna/gcc.js code.c -DDEBUG=1        # With preprocessor macros
 ```
 
 ## Quick Start
@@ -261,9 +261,9 @@ Features:
 ### Project Structure
 
 ```
-gcc.js/
+@prastavna/gcc.js/
 ├── src/
-│   ├── cli.ts              # CLI entry point (npx gcc.js)
+│   ├── cli.ts              # CLI entry point (npx @prastavna/gcc.js)
 │   ├── gcc/
 │   │   ├── index.ts        # Main compile() API
 │   │   ├── preprocessor.ts # C preprocessor

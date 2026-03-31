@@ -6,7 +6,7 @@
   "main": "dist/gcc/index.js",
   "types": "dist/gcc/index.d.ts",
   "bin": {
-    "gcc.js": "dist/cli.js"
+    "@prastavna/gcc.js": "dist/cli.js"
   },
   "exports": {
     ".": {

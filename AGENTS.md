@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-gcc.js is a client-side C-to-WebAssembly compiler written in pure TypeScript. It takes C source code as a string and produces a runnable WASM module. No Emscripten, no native dependencies. There is playground web application as well written in pure TypeScript to try out the library.
+@prastavna/gcc.js is a client-side C-to-WebAssembly compiler written in pure TypeScript. It takes C source code as a string and produces a runnable WASM module. No Emscripten, no native dependencies. There is playground web application as well written in pure TypeScript to try out the library.
 
 ## Build & Test
 

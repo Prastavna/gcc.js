@@ -215,7 +215,7 @@ import { ref } from 'vue'
   <div class="flex items-center justify-between border-b border-[var(--color-border)] bg-zinc-900 px-4 py-2">
     <!-- Left: title -->
     <div class="flex items-center gap-3">
-      <h1 class="text-sm font-bold tracking-tight text-zinc-100">gcc.js</h1>
+      <h1 class="text-sm font-bold tracking-tight text-zinc-100">@prastavna/gcc.js</h1>
       <span class="text-xs text-zinc-600">playground</span>
       <a
         href="https://github.com/Prastavna/gcc.js"

@@ -7,9 +7,9 @@ import { compile } from "./gcc/index.ts";
 const args = process.argv.slice(2);
 
 if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
-  console.log(`gcc.js - C to WebAssembly compiler
+  console.log(`@prastavna/gcc.js - C to WebAssembly compiler
 
-Usage: gcc.js <input.c> [options]
+Usage: @prastavna/gcc.js <input.c> [options]
 
 Options:
   -o <file>     Output file (default: <input>.wasm)
@@ -18,9 +18,9 @@ Options:
   --version, -v Show version
 
 Examples:
-  gcc.js code.c              Compile code.c to code.wasm
-  gcc.js code.c -o out.wasm  Compile code.c to out.wasm
-  gcc.js code.c -D DEBUG=1   Compile with DEBUG macro defined`);
+  @prastavna/gcc.js code.c              Compile code.c to code.wasm
+  @prastavna/gcc.js code.c -o out.wasm  Compile code.c to out.wasm
+  @prastavna/gcc.js code.c -D DEBUG=1   Compile with DEBUG macro defined`);
   process.exit(0);
 }
 

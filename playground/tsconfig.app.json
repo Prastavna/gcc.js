@@ -4,7 +4,7 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "types": ["vite/client"],
     "paths": {
-      "gcc.js": ["../src/gcc/index.ts"]
+      "@prastavna/gcc.js": ["../src/gcc/index.ts"]
     },
 
     /* Linting */

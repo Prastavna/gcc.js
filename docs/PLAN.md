@@ -631,7 +631,7 @@ int main() {
 ## Project Structure
 
 ```
-gcc.js/
+@prastavna/gcc.js/
 ├── docs/
 │   ├── PLAN.md              # This file
 │   ├── ARCHITECTURE.md      # Compiler architecture

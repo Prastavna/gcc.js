@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [tailwindcss(), vue()],
   resolve: {
     alias: {
-      'gcc.js': resolve(__dirname, '../src/gcc'),
+      '@prastavna/gcc.js': resolve(__dirname, '../src/gcc'),
     },
   },
   server: {

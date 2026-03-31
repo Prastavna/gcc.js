@@ -217,6 +217,19 @@ import { ref } from 'vue'
     <div class="flex items-center gap-3">
       <h1 class="text-sm font-bold tracking-tight text-zinc-100">gcc.js</h1>
       <span class="text-xs text-zinc-600">playground</span>
+      <a
+        href="https://github.com/Prastavna/gcc.js"
+        target="_blank"
+        rel="noreferrer"
+        class="flex items-center"
+        aria-label="GitHub stars"
+      >
+        <img
+          src="https://img.shields.io/github/stars/Prastavna/gcc.js?style=social"
+          alt="GitHub stars"
+          class="h-5"
+        >
+      </a>
     </div>
 
     <!-- Right: actions -->

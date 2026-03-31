@@ -1,4 +1,4 @@
-# gcc.js - API Reference
+# @prastavna/gcc.js - API Reference
 
 ## Installation
 

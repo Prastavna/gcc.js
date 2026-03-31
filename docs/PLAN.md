@@ -1,4 +1,4 @@
-# gcc.js - Project Plan
+# @prastavna/gcc.js - Project Plan
 
 A client-side C-to-WebAssembly compiler written in pure TypeScript. No server, no Emscripten, no native dependencies. Takes C source code as a string, produces a runnable WASM module in the browser.
 

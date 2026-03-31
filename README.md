@@ -1,4 +1,4 @@
-# gcc.js
+# @prastavna/gcc.js
 
 A client-side C-to-WebAssembly compiler written in pure TypeScript. Compiles a substantial subset of C89/ANSI-C to runnable WASM modules directly in the browser or any JavaScript runtime - no server, no Emscripten, no native dependencies.
 
@@ -35,7 +35,7 @@ npx gcc.js code.c -DDEBUG=1        # With preprocessor macros
 ## Quick Start
 
 ```ts
-import { compile } from "gcc.js";
+import { compile } from "@prastavna/gcc.js";
 
 const result = compile(`
   int square(int x) { return x * x; }
@@ -195,7 +195,7 @@ interface CompileError {
 For advanced usage, individual pipeline stages are exported:
 
 ```ts
-import { preprocess, tokenize, parse, generate } from "gcc.js";
+import { preprocess, tokenize, parse, generate } from "@prastavna/gcc.js";
 // preprocess: source → preprocessed source
 // tokenize:   source → Token[]
 // parse:      Token[] → AST
